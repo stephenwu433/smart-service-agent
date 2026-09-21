@@ -70,6 +70,7 @@ class EmpathyCard(BaseModel):
     )
     pending_confirmation: Optional[dict[str, Any]] = None
     next_a1289_stage: Optional[str] = None
+    next_attempt_id: Optional[str] = None
 
 
 class Attachment(BaseModel):
@@ -101,6 +102,14 @@ class ConsumerResponse(BaseModel):
     event_id: Optional[str] = None
     event_status: Optional[str] = None
     estimated_response_at: Optional[datetime] = None
+    next_attempt_id: Optional[str] = None
+    confirmation_required: bool = False
+    old_fact: Optional[dict[str, Any]] = None
+    new_fact: Optional[dict[str, Any]] = None
+    affected_attempt_ids: list[str] = Field(default_factory=list)
+    new_revision: Optional[int] = None
+    withdrawn_attempt_ids: list[str] = Field(default_factory=list)
+    preserved_fact_ids: list[str] = Field(default_factory=list)
 
 
 class HandoffDecision(BaseModel):

@@ -147,6 +147,11 @@ class ConversationOrchestrator:
                 "result_id": result_id,
             },
         )
+        pending = card.pending_confirmation or {}
+        confirmation_required = card.confirmation_type in (
+            "safety_precheck",
+            "resolved_check",
+        )
         return ConsumerResponse(
             conversation_id=conversation_id,
             result_id=result_id,
@@ -158,6 +163,14 @@ class ConversationOrchestrator:
                 else []
             ),
             available_actions=actions,
+            next_attempt_id=card.next_attempt_id,
+            confirmation_required=confirmation_required,
+            old_fact=pending.get("old"),
+            new_fact=pending.get("new"),
+            affected_attempt_ids=pending.get("withdrawn_attempt_ids", []),
+            new_revision=pending.get("new_revision"),
+            withdrawn_attempt_ids=pending.get("withdrawn_attempt_ids", []),
+            preserved_fact_ids=pending.get("preserved_fact_ids", []),
         )
 
     @staticmethod
@@ -181,6 +194,23 @@ class ConversationOrchestrator:
         triggers = ("说错", "看错", "记错", "实际是", "其实是", "应该是", "搞错")
         if not any(t in text for t in triggers):
             return None
+        # cable_model <-> charger_model 更正（故事 2）
+        cable_terms = ("换过线", "换了线", "换线", "换过线材", "换了线材")
+        charger_terms = ("换过充电头", "换过充电器", "换了充电头", "换了充电器", "换充电头", "换充电器")
+        has_cable = any(t in text for t in cable_terms)
+        has_charger = any(t in text for t in charger_terms)
+        if has_cable and has_charger:
+            pos_actual = max(text.find("其实"), text.find("实际"))
+            after = text[pos_actual:] if pos_actual >= 0 else text
+            if any(t in after for t in ("充电头", "充电器", "适配器")):
+                return {
+                    "old_facts": {"cable_model": "换过"},
+                    "new_facts": {"charger_model": "换过"},
+                }
+            return {
+                "old_facts": {"charger_model": "换过"},
+                "new_facts": {"cable_model": "换过"},
+            }
         ports = {"C1": "C1", "C2": "C2", "USB-A": "USB-A", "USB A": "USB-A"}
         # 先从 "不是 X" 提取被否定的旧值，从候选中排除
         excluded: set[str] = set()
@@ -207,15 +237,20 @@ class ConversationOrchestrator:
         conversation_id: str,
         conversation: StoredConversation,
         correction: dict[str, dict[str, str]],
-    ) -> list[str]:
+    ) -> dict[str, Any]:
         from smart_service_agent.models import CaseRevision as _CR
 
         now = utc_now()
         previous = conversation.case.revisions[-1]
         new_rev_num = conversation.case.current_revision + 1
+        merged_facts = {**previous.facts, **correction["new_facts"]}
+        # 被更正的旧字段若未在新事实中覆盖，则从事实里移除
+        for old_k in correction["old_facts"]:
+            if old_k not in correction["new_facts"]:
+                merged_facts.pop(old_k, None)
         new_revision = _CR(
             revision=new_rev_num,
-            facts={**previous.facts, **correction["new_facts"]},
+            facts=merged_facts,
             unknown_fields=previous.unknown_fields,
             reason="用户更正",
             created_at=now,
@@ -223,7 +258,9 @@ class ConversationOrchestrator:
         conversation.case.revisions.append(new_revision)
         conversation.case.current_revision = new_rev_num
 
-        changed_fields = set(correction["new_facts"].keys())
+        changed_fields = set(correction["old_facts"].keys()) | set(
+            correction["new_facts"].keys()
+        )
         withdrawn_ids: list[str] = []
         for attempt in conversation.attempts:
             if attempt.status != "active":
@@ -240,7 +277,12 @@ class ConversationOrchestrator:
             details = []
             for f in hit:
                 old_dep = attempt.depends_on[f]
-                details.append(f"{f} {old_dep.get('value')} -> {correction['new_facts'][f]}")
+                if f in correction["new_facts"]:
+                    details.append(
+                        f"{f} {old_dep.get('value')} -> {correction['new_facts'][f]}"
+                    )
+                else:
+                    details.append(f"{f} {old_dep.get('value')} removed")
             attempt.withdrawn_reason = "fact_changed: " + "; ".join(details)
             attempt.updated_at = now
             withdrawn_ids.append(attempt.attempt_id)
@@ -256,7 +298,14 @@ class ConversationOrchestrator:
                 "withdrawn_attempt_ids": withdrawn_ids,
             },
         )
-        return withdrawn_ids
+        preserved_fact_ids = [
+            f for f in new_revision.facts.keys() if f not in changed_fields
+        ]
+        return {
+            "withdrawn_attempt_ids": withdrawn_ids,
+            "new_revision": new_rev_num,
+            "preserved_fact_ids": preserved_fact_ids,
+        }
 
     @staticmethod
     def _has_internal_contradiction(text: str) -> bool:
@@ -473,6 +522,7 @@ class ConversationOrchestrator:
         confirmation_type=None,
         pending_confirmation=None,
         next_a1289_stage=None,
+        next_attempt_id=None,
     ):
         return EmpathyCard(
             conversation_id=conversation_id,
@@ -494,6 +544,7 @@ class ConversationOrchestrator:
             confirmation_type=confirmation_type,
             pending_confirmation=pending_confirmation,
             next_a1289_stage=next_a1289_stage,
+            next_attempt_id=next_attempt_id,
         )
 
     def _build_card(
@@ -570,7 +621,7 @@ class ConversationOrchestrator:
         if existing and not risk_terms:
             correction = self._detect_fact_correction(text, existing)
             if correction:
-                withdrawn = self._apply_correction(conversation_id, existing, correction)
+                result = self._apply_correction(conversation_id, existing, correction)
                 return self._make_a1289_card(
                     conversation_id,
                     request,
@@ -584,7 +635,9 @@ class ConversationOrchestrator:
                         "type": "fact_correction",
                         "old": correction["old_facts"],
                         "new": correction["new_facts"],
-                        "withdrawn_attempt_ids": withdrawn,
+                        "withdrawn_attempt_ids": result["withdrawn_attempt_ids"],
+                        "new_revision": result["new_revision"],
+                        "preserved_fact_ids": result["preserved_fact_ids"],
                     },
                     next_a1289_stage="R04",
                 )

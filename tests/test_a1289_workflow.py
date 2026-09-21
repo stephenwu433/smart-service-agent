@@ -515,3 +515,81 @@ def test_ms03_both_tests_fail_to_handoff(tmp_path) -> None:
     view = client.get(f"/v1/agent/conversations/{cid}").json()
     pkg = view["handoff_package"]
     assert "executed_attempts" in pkg or "missing_information" in pkg
+
+
+def test_story2_cable_to_charger_correction(tmp_path) -> None:
+    """故事 2：用户先说换过线，后更正为换过充电头，系统修正事实。"""
+    client = make_client(tmp_path)
+    cid = client.post(
+        "/v1/conversations", json={"message": "A1289 接 C1 充不进去"}
+    ).json()["conversation_id"]
+    client.post(f"/v1/conversations/{cid}/messages", json={"message": "没有"})
+
+    # 建一条依赖 cable_model 的 attempt
+    client.post(
+        f"/v1/conversations/{cid}/case/revisions",
+        json={"facts": {"cable_model": "换过"}, "reason": "用户说换过线"},
+    )
+    attempt = client.post(
+        f"/v1/conversations/{cid}/attempts",
+        json={
+            "recommendation": "使用新线材测试",
+            "purpose": "线材交叉测试",
+            "instructions": "更换线材测试是否充电",
+            "observation_target": "是否充电",
+            "exit_condition": "观察到充电",
+        },
+    ).json()
+    assert attempt["status"] == "active"
+    assert "cable_model" in attempt["depends_on"]
+
+    # 用户更正：之前说换过线，其实是换过充电头
+    corrected = client.post(
+        f"/v1/conversations/{cid}/messages",
+        json={"message": "我之前说换过线，其实是换过充电头"},
+    ).json()
+    assert corrected["old_fact"] == {"cable_model": "换过"}
+    assert corrected["new_fact"] == {"charger_model": "换过"}
+    assert attempt["attempt_id"] in corrected["withdrawn_attempt_ids"]
+    assert corrected["new_revision"] is not None
+
+
+def test_ma02_provider_timeout_during_risk_still_blocks(tmp_path) -> None:
+    """MA02: provider 超时时风险规则仍要生效。"""
+    import httpx
+    from fastapi.testclient import TestClient
+    from smart_service_agent.intent import IntentProvider
+    from smart_service_agent.main import create_app
+    from smart_service_agent.models import Intent, IntentResult
+    from smart_service_agent.repository import MemoryRepository
+
+    class TimeoutProvider(IntentProvider):
+        def classify(self, message: str) -> IntentResult:
+            raise httpx.TimeoutException("test timeout")
+
+    client = TestClient(create_app(MemoryRepository(), TimeoutProvider()))
+    body = client.post(
+        "/v1/conversations", json={"message": "A1289 充电时冒烟"}
+    ).json()
+    assert body["state"] == "BLOCK"
+
+
+def test_consumer_response_exposes_workflow_fields(tmp_path) -> None:
+    """ConsumerResponse 暴露 next_attempt_id / confirmation_required 等字段。"""
+    client = make_client(tmp_path)
+    body = client.post(
+        "/v1/conversations", json={"message": "A1289 接 C1 充不进去"}
+    ).json()
+    # 首次进入 A1289 流程，应返回 safety_precheck，confirmation_required=True
+    assert body["confirmation_required"] is True
+    assert body["state"] == "ASK"
+    for key in (
+        "next_attempt_id",
+        "old_fact",
+        "new_fact",
+        "affected_attempt_ids",
+        "new_revision",
+        "withdrawn_attempt_ids",
+        "preserved_fact_ids",
+    ):
+        assert key in body, key
