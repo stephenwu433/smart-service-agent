@@ -184,6 +184,24 @@ class ConversationOrchestrator:
         )
 
     @staticmethod
+    def _text_sufficient_for_flow(
+        text: str, existing: StoredConversation | None
+    ) -> bool:
+        keywords = (
+            "充不进",
+            "无法充电",
+            "充不上",
+            "没反应",
+            "A1289",
+            "737",
+            "自充",
+            "给充电宝",
+        )
+        if any(k in text for k in keywords):
+            return True
+        return bool(existing and existing.case and existing.case.original_statement)
+
+    @staticmethod
     def _is_safe_confirmation(text: str) -> bool:
         negations = ("没有", "无", "没发现", "没出现", "都没有", "全都没有", "无任何")
         return any(n in text for n in negations)
@@ -206,7 +224,14 @@ class ConversationOrchestrator:
             return None
         # cable_model <-> charger_model 更正（故事 2）
         cable_terms = ("换过线", "换了线", "换线", "换过线材", "换了线材")
-        charger_terms = ("换过充电头", "换过充电器", "换了充电头", "换了充电器", "换充电头", "换充电器")
+        charger_terms = (
+            "换过充电头",
+            "换过充电器",
+            "换了充电头",
+            "换了充电器",
+            "换充电头",
+            "换充电器",
+        )
         has_cable = any(t in text for t in cable_terms)
         has_charger = any(t in text for t in charger_terms)
         if has_cable and has_charger:
@@ -309,7 +334,7 @@ class ConversationOrchestrator:
             },
         )
         preserved_fact_ids = [
-            f for f in new_revision.facts.keys() if f not in changed_fields
+            f for f in new_revision.facts if f not in changed_fields
         ]
         return {
             "withdrawn_attempt_ids": withdrawn_ids,
@@ -352,6 +377,29 @@ class ConversationOrchestrator:
     @staticmethod
     def _is_stable_confirmation(text: str) -> bool:
         return any(k in text for k in ("稳定", "持续", "没有中断", "一直", "保持"))
+
+    def release_risk_lock(
+        self, conversation_id: str, reason: str, operator: str
+    ) -> StoredConversation | None:
+        conversation = self.repository.get_conversation(conversation_id)
+        if conversation is None:
+            return None
+        previous_lock = conversation.risk_lock
+        conversation.risk_lock = False
+        conversation.risk_lock_reason = None
+        conversation.risk_lock_source = f"manual:{operator}"
+        conversation.updated_at = utc_now()
+        self.repository.save_conversation(conversation)
+        self.repository.add_audit(
+            conversation_id,
+            "risk_lock_released",
+            {
+                "operator": operator,
+                "reason": reason,
+                "previous_lock": previous_lock,
+            },
+        )
+        return conversation
 
     def _build_auto_attempt(self, conversation_id, card, existing):
         stage = card.next_a1289_stage
@@ -736,7 +784,7 @@ class ConversationOrchestrator:
         if request.order_reference:
             entities["order_reference"] = request.order_reference
 
-        if request.attachments:
+        if request.attachments and not self._text_sufficient_for_flow(text, existing):
             state = ConversationState.HANDOFF
             risk = RiskLevel.LOW
             missing = ["可读取的附件内容"]
@@ -1073,9 +1121,11 @@ class ConversationOrchestrator:
         if request.execution_status == "executed" and not request.observation:
             raise ValueError("observation is required when an attempt was executed")
         attempt.execution_status = request.execution_status
-        attempt.observation = request.observation
+        attempt.observation = request.observation or request.skip_reason
         attempt.outcome = request.outcome or (
-            "unknown" if request.execution_status == "skipped" else None
+            "unknown"
+            if request.execution_status in ("skipped", "skipped_unavailable")
+            else None
         )
         attempt.updated_at = utc_now()
         conversation.updated_at = attempt.updated_at

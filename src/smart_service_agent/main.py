@@ -24,7 +24,9 @@ from smart_service_agent.models import (
     HandoffDecision,
     InsightMetric,
     InsightsResponse,
+    RiskLockReleaseRequest,
     ServiceActionRequest,
+    StoredConversation,
     TicketRecord,
     TicketResultRequest,
 )
@@ -58,6 +60,21 @@ def create_app(
     @application.get("/health", tags=["system"])
     def health_check() -> dict[str, str]:
         return {"status": "ok", "environment": settings.app_env}
+
+    @application.post(
+        "/v1/agent/conversations/{conversation_id}/risk-lock/release",
+        response_model=StoredConversation,
+        tags=["agent"],
+    )
+    def release_risk_lock(
+        conversation_id: str, request: RiskLockReleaseRequest
+    ) -> StoredConversation:
+        conversation = orchestrator.release_risk_lock(
+            conversation_id, request.reason, request.operator
+        )
+        if conversation is None:
+            raise HTTPException(status_code=404, detail="conversation not found")
+        return conversation
 
     @application.post(
         "/v1/conversations",

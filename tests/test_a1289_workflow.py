@@ -558,9 +558,10 @@ def test_ma02_provider_timeout_during_risk_still_blocks(tmp_path) -> None:
     """MA02: provider 超时时风险规则仍要生效。"""
     import httpx
     from fastapi.testclient import TestClient
+
     from smart_service_agent.intent import IntentProvider
     from smart_service_agent.main import create_app
-    from smart_service_agent.models import Intent, IntentResult
+    from smart_service_agent.models import IntentResult
     from smart_service_agent.repository import MemoryRepository
 
     class TimeoutProvider(IntentProvider):
@@ -625,3 +626,63 @@ def test_d03_uncertain_compatibility_goes_handoff(tmp_path) -> None:
         json={"message": "都有，但不确定是否兼容"},
     ).json()
     assert body["state"] == "HANDOFF"
+
+
+def test_d09_manual_risk_lock_release(tmp_path) -> None:
+    """D09：人工解除风险锁后，普通流程恢复。"""
+    client = make_client(tmp_path)
+    cid = client.post(
+        "/v1/conversations", json={"message": "充电器冒烟"}
+    ).json()["conversation_id"]
+    r1 = client.post(
+        f"/v1/conversations/{cid}/messages",
+        json={"message": "我现在想问订单退款"},
+    ).json()
+    assert r1["state"] == "HANDOFF"
+
+    release = client.post(
+        f"/v1/agent/conversations/{cid}/risk-lock/release",
+        json={"reason": "已完成风险处理", "operator": "agent-001"},
+    )
+    assert release.status_code == 200
+    assert release.json()["risk_lock"] is False
+
+
+def test_d05_attachment_with_sufficient_text_proceeds(tmp_path) -> None:
+    """D05：附件可选，文字信息足够时正常建立工单。"""
+    client = make_client(tmp_path)
+    body = client.post(
+        "/v1/conversations",
+        json={
+            "message": "A1289 接 C1 充不进去",
+            "attachments": [{"kind": "product_image", "filename": "photo.jpg"}],
+        },
+    ).json()
+    assert body["state"] == "ASK"
+    assert body["confirmation_required"] is True
+
+
+def test_skipped_unavailable_records_reason(tmp_path) -> None:
+    """skipped_unavailable：记录用户无法执行的原因。"""
+    client = make_client(tmp_path)
+    cid = client.post(
+        "/v1/conversations", json={"message": "A1289 接 C1 充不进去"}
+    ).json()["conversation_id"]
+    client.post(f"/v1/conversations/{cid}/messages", json={"message": "没有"})
+    body = client.post(
+        f"/v1/conversations/{cid}/messages", json={"message": "屏幕 0W"}
+    ).json()
+    attempt_id = body["next_attempt_id"]
+    assert attempt_id is not None
+
+    update = client.patch(
+        f"/v1/conversations/{cid}/attempts/{attempt_id}",
+        json={
+            "execution_status": "skipped_unavailable",
+            "skip_reason": "没有其他插座可换",
+        },
+    )
+    assert update.status_code == 200
+    data = update.json()
+    assert data["execution_status"] == "skipped_unavailable"
+    assert data["observation"] == "没有其他插座可换"

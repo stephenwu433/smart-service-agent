@@ -123,6 +123,11 @@ class FeedbackRequest(BaseModel):
     comment: Optional[str] = Field(default=None, max_length=1000)
 
 
+class RiskLockReleaseRequest(BaseModel):
+    reason: str = Field(min_length=1, max_length=300)
+    operator: str = Field(min_length=1, max_length=100)
+
+
 class ServiceActionRequest(BaseModel):
     action: Literal["reply", "request_material", "create_after_sales", "escalate_expert", "close"]
     parameters: dict[str, Any] = Field(default_factory=dict)
@@ -159,9 +164,10 @@ class AttemptCreateRequest(BaseModel):
 
 
 class AttemptUpdateRequest(BaseModel):
-    execution_status: Literal["executed", "skipped"]
+    execution_status: Literal["executed", "skipped", "skipped_unavailable"]
     observation: Optional[str] = Field(default=None, max_length=1000)
-    outcome: Optional[Literal["improved", "unchanged", "worse", "unknown"]] = None
+    outcome: Optional[Literal["improved", "unchanged", "worse", "unknown", "resolved"]] = None
+    skip_reason: Optional[str] = Field(default=None, max_length=500)
 
 
 class AttemptRecord(BaseModel):
@@ -172,7 +178,9 @@ class AttemptRecord(BaseModel):
     instructions: str
     observation_target: str
     exit_condition: str
-    execution_status: Literal["proposed", "executed", "skipped"] = "proposed"
+    execution_status: Literal["proposed", "executed", "skipped", "skipped_unavailable"] = (
+        "proposed"
+    )
     observation: Optional[str] = None
     outcome: Optional[Literal["improved", "unchanged", "worse", "unknown"]] = None
     depends_on: dict[str, dict[str, Any]] = Field(default_factory=dict)
