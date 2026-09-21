@@ -593,3 +593,35 @@ def test_consumer_response_exposes_workflow_fields(tmp_path) -> None:
         "preserved_fact_ids",
     ):
         assert key in body, key
+
+
+def test_guide_auto_creates_attempt(tmp_path) -> None:
+    """步骤闭环：GUIDE 状态自动建 Attempt，返回 next_attempt_id。"""
+    client = make_client(tmp_path)
+    cid = client.post(
+        "/v1/conversations", json={"message": "A1289 接 C1 充不进去"}
+    ).json()["conversation_id"]
+    client.post(f"/v1/conversations/{cid}/messages", json={"message": "没有"})
+    body = client.post(
+        f"/v1/conversations/{cid}/messages", json={"message": "屏幕 0W"}
+    ).json()
+    assert body["state"] == "GUIDE"
+    assert body["next_attempt_id"] is not None
+    attempts = client.get(f"/v1/conversations/{cid}/attempts").json()
+    assert any(a["attempt_id"] == body["next_attempt_id"] for a in attempts)
+
+
+def test_d03_uncertain_compatibility_goes_handoff(tmp_path) -> None:
+    """D03：配件兼容性未知时，不做通电测试，记录未测试转人工。"""
+    client = make_client(tmp_path)
+    cid = client.post(
+        "/v1/conversations", json={"message": "A1289 接 C1 充不进去"}
+    ).json()["conversation_id"]
+    client.post(f"/v1/conversations/{cid}/messages", json={"message": "没有"})
+    client.post(f"/v1/conversations/{cid}/messages", json={"message": "屏幕 0W"})
+    client.post(f"/v1/conversations/{cid}/messages", json={"message": "换了插座还是不行"})
+    body = client.post(
+        f"/v1/conversations/{cid}/messages",
+        json={"message": "都有，但不确定是否兼容"},
+    ).json()
+    assert body["state"] == "HANDOFF"

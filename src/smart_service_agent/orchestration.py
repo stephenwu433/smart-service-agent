@@ -99,6 +99,16 @@ class ConversationOrchestrator:
         messages = [*existing.messages, request.message] if existing else [request.message]
         card = self._build_card(conversation_id, request, existing)
         result_id = f"result_{uuid4().hex}"
+        attempts_list = list(existing.attempts) if existing else []
+        if (
+            card.next_state == ConversationState.GUIDE
+            and card.next_a1289_stage is not None
+            and card.next_attempt_id is None
+        ):
+            auto_attempt = self._build_auto_attempt(conversation_id, card, existing)
+            if auto_attempt is not None:
+                attempts_list.append(auto_attempt)
+                card.next_attempt_id = auto_attempt.attempt_id
         response_text, actions = self._consumer_copy(card)
         stored = StoredConversation(
             conversation_id=conversation_id,
@@ -109,7 +119,7 @@ class ConversationOrchestrator:
             unresolved_attempts=(existing.unresolved_attempts if existing else 0)
             + int(card.next_state not in {ConversationState.RESOLVE, ConversationState.GUIDE}),
             case=existing.case if existing else self._initial_case(conversation_id, request),
-            attempts=list(existing.attempts) if existing else [],
+            attempts=attempts_list,
             ticket=existing.ticket if existing else None,
             risk_lock=(existing.risk_lock if existing else False)
             or card.next_state == ConversationState.BLOCK,
@@ -343,6 +353,54 @@ class ConversationOrchestrator:
     def _is_stable_confirmation(text: str) -> bool:
         return any(k in text for k in ("稳定", "持续", "没有中断", "一直", "保持"))
 
+    def _build_auto_attempt(self, conversation_id, card, existing):
+        stage = card.next_a1289_stage
+        specs = {
+            "R04": (
+                "更换插座测试",
+                "插座交叉测试",
+                "保持充电器和线材不变，更换到已知正常供电的插座测试",
+                "是否建立稳定输入",
+                "观察到稳定输入",
+            ),
+            "R05": (
+                "更换充电器测试",
+                "充电器交叉测试",
+                "保持线材不变，只更换其他可正常使用的充电器",
+                "是否建立稳定输入",
+                "观察到稳定输入",
+            ),
+            "R06": (
+                "更换线材测试",
+                "线材交叉测试",
+                "保持充电器不变，只更换其他可正常使用的 USB-C to USB-C 线",
+                "是否建立稳定输入",
+                "观察到稳定输入",
+            ),
+        }
+        spec = specs.get(stage)
+        if spec is None:
+            return None
+        rec, purpose, instr, target, exit_c = spec
+        depends_on = (
+            self._infer_depends_on(f"{rec} {purpose} {instr}", existing)
+            if existing
+            else {}
+        )
+        now = utc_now()
+        return AttemptRecord(
+            attempt_id=f"attempt_{uuid4().hex}",
+            conversation_id=conversation_id,
+            recommendation=rec,
+            purpose=purpose,
+            instructions=instr,
+            observation_target=target,
+            exit_condition=exit_c,
+            depends_on=depends_on,
+            created_at=now,
+            updated_at=now,
+        )
+
     def _a1289_advance(self, conversation_id, request, existing, text):
         pending = existing.pending_confirmation or {}
         confirmed = [*(existing.empathy_card.confirmed_facts), request.message]
@@ -426,6 +484,24 @@ class ConversationOrchestrator:
                 )
             entities = dict(entities)
             entities["a1289_accessories"] = acc
+            uncertainty = (
+                "不确定",
+                "不知道",
+                "不清楚",
+                "可能不兼容",
+                "不确认",
+            )
+            if acc != "none" and any(u in text for u in uncertainty):
+                return self._make_a1289_card(
+                    conversation_id,
+                    request,
+                    existing,
+                    next_state=ConversationState.HANDOFF,
+                    missing=["配件兼容性未确认，未执行通电测试"],
+                    confirmed=confirmed,
+                    entities=entities,
+                    next_a1289_stage="R07",
+                )
             if acc == "none":
                 return self._make_a1289_card(
                     conversation_id,
