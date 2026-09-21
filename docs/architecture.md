@@ -65,6 +65,66 @@ MongoDB 使用 `conversations`、`audit_events`、`service_events`、`feedback` 
 rate limit 和正式审计主体。当前审计主体标记为 `unauthenticated_agent_api`，用于明确暴露鉴权尚未
 接入，而不是伪装成真实客服身份；配置化响应时间也不得作为未经运营确认的真实客服承诺。
 
+## A1289 P0 workflow
+
+A1289 的 P0 行为在原有确定性编排器上叠加，不改变顶层 `ConversationState` 枚举。
+
+**风险锁（跨轮保持）**
+
+- `StoredConversation.risk_lock`、`risk_lock_reason`、`risk_lock_source`。
+- 命中 `HIGH_RISK_TERMS`（含进液、洒到、烫得、烤焦等变体）或 `_active_risk_terms` 判定的风险
+  后，写入 `risk_lock=True`。
+- 下一轮若 `risk_terms` 为空，`_build_card` 检查 `existing.risk_lock`，把
+  `risk_lock_reason` 当成本轮风险词继续走 `BLOCK`。
+- 例外：用户明确转向 `订单/退款/退货/物流/发票/保修`，不应用锁，走正常流程。
+- D09：不因用户下一轮说"没有风险了"自动解锁；只有人工通过
+  `POST /v1/agent/conversations/{cid}/risk-lock/release` 解除。
+
+**事实依赖（按字段）**
+
+- `AttemptRecord.depends_on` 是 `{field: {"value": v, "revision": r}}`。
+- `create_attempt` 从 `recommendation + purpose + instructions` 推断相关字段，从当前 Case
+  revision 取值写入。
+- `revise_case` 与 `_apply_correction` 比较 `changed_fields`（`old_facts` ∪ `new_facts`）与
+  `attempt.depends_on`，只撤回匹配字段且旧 revision 落后的 Attempt。
+
+**局部回退**
+
+- `_apply_correction` 接受 `{"old_facts": {...}, "new_facts": {...}}`。
+- 被更正的旧字段若未在新事实中覆盖，从 merged facts 中移除（如 `cable_model` → `charger_model`）。
+- 撤回时写 `status="withdrawn"`、`withdrawn_reason="fact_changed: field old -> new"`，
+  并在 audit 记录 `old_facts`、`new_facts`、`withdrawn_attempt_ids`。
+- 未依赖该字段的 Attempt 与 Case 历史保持不变。
+
+**确认流（内部 confirmation_type）**
+
+- `EmpathyCard.confirmation_type` 取值 `safety_precheck` / `fact_correction` /
+  `resolved_check`，不新增顶层状态。
+- `safety_precheck`：A1289 首次进入时先问"是否有鼓包、异味、冒烟、进液、异常发热"，用户回
+  否定词才推进到 R03。
+- `fact_correction`：跨轮明确更正直接接受；同轮矛盾（MA01）改为追问。
+- `resolved_check`：用户报告恢复后继续问"是否稳定"，用户确认稳定才结案。
+
+**A1289 阶段机**
+
+- `a1289_stage` 记录 R03 / R04 / X / R05 / R06 / R07。
+- `_a1289_advance` 按 `pending_confirmation` 和 `a1289_stage` 决定下一步。
+- Sheet2 配件路径：`both` → R05 → R06；`charger_only` → R05；`cable_only` → R06；
+  `none` → HANDOFF。
+- D03：X 阶段若用户表达配件兼容性不确定，记录未测试并直接 HANDOFF，不执行通电测试。
+
+**步骤闭环**
+
+- `_process` 在 `GUIDE` + `a1289_stage` 非空时，自动调用 `_build_auto_attempt` 创建 Attempt，
+  填 `depends_on`，把 `attempt_id` 写入 `EmpathyCard.next_attempt_id` 并转发到
+  `ConsumerResponse.next_attempt_id`。
+- R04 / R05 / R06 各自有 recommendation / purpose / instructions 模板。
+
+**边界排除**
+
+- `_is_a1289_issue` 排除对外供电（NB01）。
+- `A1259` 等其他型号不进入本流程（NB02）。
+
 ## Production 接入路线
 
 建议按依赖关系推进，而不是先绑定尚未确定的 vendor：
