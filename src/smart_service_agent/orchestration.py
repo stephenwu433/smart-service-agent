@@ -33,7 +33,28 @@ from smart_service_agent.models import (
 )
 from smart_service_agent.repository import StorageRepository, utc_now
 
-HIGH_RISK_TERMS = ("冒烟", "异味", "起火", "漏液", "鼓包", "异常发热")
+HIGH_RISK_TERMS = (
+    "冒烟",
+    "异味",
+    "起火",
+    "漏液",
+    "进液",
+    "进水",
+    "液体进入",
+    "洒到",
+    "洒进",
+    "渗液",
+    "鼓包",
+    "异常发热",
+    "烫得",
+    "烫手",
+    "发烫",
+    "过热",
+    "烤焦",
+    "烧焦",
+    "焦味",
+    "塑料味",
+)
 HYPOTHETICAL_PREFIXES = ("会不会", "是否会", "会否", "怕", "担心")
 RESOLVED_TERMS = ("已经好了", "已恢复", "现在好了", "已消退")
 
@@ -89,6 +110,16 @@ class ConversationOrchestrator:
             case=existing.case if existing else self._initial_case(conversation_id, request),
             attempts=list(existing.attempts) if existing else [],
             ticket=existing.ticket if existing else None,
+            risk_lock=(existing.risk_lock if existing else False)
+            or card.next_state == ConversationState.BLOCK,
+            risk_lock_reason=(
+                (existing.risk_lock_reason if existing and existing.risk_lock else None)
+                or (card.risk_reasons[0] if card.risk_reasons else None)
+            ),
+            risk_lock_source=(
+                (existing.risk_lock_source if existing and existing.risk_lock else None)
+                or ("auto_safety_rules" if card.next_state == ConversationState.BLOCK else None)
+            ),
             created_at=existing.created_at if existing else now,
             updated_at=now,
         )
@@ -126,6 +157,10 @@ class ConversationOrchestrator:
     ) -> EmpathyCard:
         text = request.message
         risk_terms = self._active_risk_terms(text)
+        if existing and existing.risk_lock and not risk_terms:
+            after_sales_terms = ("订单", "退款", "退货", "物流", "发票", "保修")
+            if not any(term in text for term in after_sales_terms):
+                risk_terms = [existing.risk_lock_reason or "risk_lock_active"]
         confirmed = list(
             dict.fromkeys(
                 [*(existing.empathy_card.confirmed_facts if existing else []), request.message]

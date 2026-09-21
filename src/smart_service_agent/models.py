@@ -246,5 +246,8 @@ class StoredConversation(BaseModel):
     case: Optional[CaseRecord] = None
     attempts: list[AttemptRecord] = Field(default_factory=list)
     ticket: Optional[TicketRecord] = None
+    risk_lock: bool = False
+    risk_lock_reason: Optional[str] = None
+    risk_lock_source: Optional[str] = None
     created_at: datetime
     updated_at: datetime
