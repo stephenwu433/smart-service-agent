@@ -65,6 +65,11 @@ class EmpathyCard(BaseModel):
     knowledge_refs: list[KnowledgeReference] = Field(default_factory=list)
     next_state: ConversationState
     schema_version: str
+    confirmation_type: Optional[Literal["safety_precheck", "fact_correction", "resolved_check"]] = (
+        None
+    )
+    pending_confirmation: Optional[dict[str, Any]] = None
+    next_a1289_stage: Optional[str] = None
 
 
 class Attachment(BaseModel):
@@ -252,5 +257,7 @@ class StoredConversation(BaseModel):
     risk_lock: bool = False
     risk_lock_reason: Optional[str] = None
     risk_lock_source: Optional[str] = None
+    a1289_stage: Optional[str] = None
+    pending_confirmation: Optional[dict[str, Any]] = None
     created_at: datetime
     updated_at: datetime

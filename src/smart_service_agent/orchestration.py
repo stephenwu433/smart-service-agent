@@ -121,6 +121,16 @@ class ConversationOrchestrator:
                 (existing.risk_lock_source if existing and existing.risk_lock else None)
                 or ("auto_safety_rules" if card.next_state == ConversationState.BLOCK else None)
             ),
+            a1289_stage=(
+                None
+                if card.next_a1289_stage == "__clear__"
+                else (
+                    card.next_a1289_stage
+                    if card.next_a1289_stage is not None
+                    else (existing.a1289_stage if existing else None)
+                )
+            ),
+            pending_confirmation=card.pending_confirmation,
             created_at=existing.created_at if existing else now,
             updated_at=now,
         )
@@ -150,6 +160,342 @@ class ConversationOrchestrator:
             available_actions=actions,
         )
 
+    @staticmethod
+    def _is_safe_confirmation(text: str) -> bool:
+        negations = ("没有", "无", "没发现", "没出现", "都没有", "全都没有", "无任何")
+        return any(n in text for n in negations)
+
+    @staticmethod
+    def _is_a1289_issue(text: str) -> bool:
+        if "A1289" not in text and "737" not in text:
+            return False
+        output_terms = ("接手机", "给手机", "给设备供电", "对外供电", "输出")
+        return not any(t in text for t in output_terms)
+
+    @staticmethod
+    def _detect_fact_correction(
+        text: str, existing: StoredConversation
+    ) -> dict[str, dict[str, str]] | None:
+        if not existing.case or not existing.case.revisions:
+            return None
+        triggers = ("说错", "看错", "记错", "实际是", "其实是", "应该是", "搞错")
+        if not any(t in text for t in triggers):
+            return None
+        ports = {"C1": "C1", "C2": "C2", "USB-A": "USB-A", "USB A": "USB-A"}
+        # 先从 "不是 X" 提取被否定的旧值，从候选中排除
+        excluded: set[str] = set()
+        for match in re.finditer(r"不是\s*(C1|C2|USB-A|USB A)", text):
+            excluded.add(ports[match.group(1)])
+        found_ports = list(
+            dict.fromkeys(ports[k] for k in ports if k in text and ports[k] not in excluded)
+        )
+        current = existing.case.revisions[-1].facts
+        old_port = current.get("charging_port")
+        new_port = next((p for p in found_ports if p != old_port), None)
+        if new_port is None:
+            return None
+        # 如果 old_port 为空，把被排除的那一个作为 old_port
+        if old_port is None and excluded:
+            old_port = next(iter(excluded))
+        return {
+            "old_facts": {"charging_port": old_port},
+            "new_facts": {"charging_port": new_port},
+        }
+
+    def _apply_correction(
+        self,
+        conversation_id: str,
+        conversation: StoredConversation,
+        correction: dict[str, dict[str, str]],
+    ) -> list[str]:
+        from smart_service_agent.models import CaseRevision as _CR
+
+        now = utc_now()
+        previous = conversation.case.revisions[-1]
+        new_rev_num = conversation.case.current_revision + 1
+        new_revision = _CR(
+            revision=new_rev_num,
+            facts={**previous.facts, **correction["new_facts"]},
+            unknown_fields=previous.unknown_fields,
+            reason="用户更正",
+            created_at=now,
+        )
+        conversation.case.revisions.append(new_revision)
+        conversation.case.current_revision = new_rev_num
+
+        changed_fields = set(correction["new_facts"].keys())
+        withdrawn_ids: list[str] = []
+        for attempt in conversation.attempts:
+            if attempt.status != "active":
+                continue
+            hit = [
+                f
+                for f in changed_fields
+                if f in attempt.depends_on
+                and attempt.depends_on[f].get("revision", new_rev_num) < new_rev_num
+            ]
+            if not hit:
+                continue
+            attempt.status = "withdrawn"
+            details = []
+            for f in hit:
+                old_dep = attempt.depends_on[f]
+                details.append(f"{f} {old_dep.get('value')} -> {correction['new_facts'][f]}")
+            attempt.withdrawn_reason = "fact_changed: " + "; ".join(details)
+            attempt.updated_at = now
+            withdrawn_ids.append(attempt.attempt_id)
+
+        self.repository.add_audit(
+            conversation_id,
+            "case_revised",
+            {
+                "revision": new_rev_num,
+                "reason": "用户更正",
+                "old_facts": correction["old_facts"],
+                "new_facts": correction["new_facts"],
+                "withdrawn_attempt_ids": withdrawn_ids,
+            },
+        )
+        return withdrawn_ids
+
+    @staticmethod
+    def _has_internal_contradiction(text: str) -> bool:
+        port_hits = sum(1 for p in ("C1", "C2", "USB-A", "USB A") if p in text)
+        hesitation = ("不对", "可能", "也许", "或者", "一会儿", "又", "不确定")
+        return port_hits >= 2 and any(h in text for h in hesitation)
+
+    @staticmethod
+    def _detect_accessories(text: str) -> str | None:
+        if any(k in text for k in ("都有", "两个都有", "都有替换", "都有可用")):
+            return "both"
+        if any(k in text for k in ("都没有", "都没", "都无", "全都没有")):
+            return "none"
+        if any(k in text for k in ("只有线", "只有一根线", "没有充电器")):
+            return "cable_only"
+        if any(k in text for k in ("只有充电器", "只有充电头", "没有线材", "没有线")):
+            return "charger_only"
+        if text.strip() in ("没有", "无", "没"):
+            return "none"
+        return None
+
+    @staticmethod
+    def _mentions_charger(text: str) -> bool:
+        return any(k in text for k in ("充电器", "充电头", "适配器"))
+
+    @staticmethod
+    def _mentions_cable(text: str) -> bool:
+        return any(k in text for k in ("线", "线材", "数据线"))
+
+    @staticmethod
+    def _looks_resolved(text: str) -> bool:
+        return any(k in text for k in ("恢复", "好了", "有输入", "充上了", "正常", "有充电"))
+
+    @staticmethod
+    def _is_stable_confirmation(text: str) -> bool:
+        return any(k in text for k in ("稳定", "持续", "没有中断", "一直", "保持"))
+
+    def _a1289_advance(self, conversation_id, request, existing, text):
+        pending = existing.pending_confirmation or {}
+        confirmed = [*(existing.empathy_card.confirmed_facts), request.message]
+        entities = dict(existing.empathy_card.entities)
+
+        if pending.get("type") == "resolved_check":
+            if self._is_stable_confirmation(text):
+                return self._make_a1289_card(
+                    conversation_id,
+                    request,
+                    existing,
+                    next_state=ConversationState.RESOLVE,
+                    missing=[],
+                    confirmed=confirmed,
+                    entities=entities,
+                    confirmation_type=None,
+                    pending_confirmation=None,
+                    next_a1289_stage="__clear__",
+                )
+            return self._make_a1289_card(
+                conversation_id,
+                request,
+                existing,
+                next_state=ConversationState.GUIDE,
+                missing=["请重新更换插座或配件测试"],
+                confirmed=confirmed,
+                entities=entities,
+                next_a1289_stage="R04",
+            )
+
+        stage = existing.a1289_stage
+        if stage == "R03":
+            return self._make_a1289_card(
+                conversation_id,
+                request,
+                existing,
+                next_state=ConversationState.GUIDE,
+                missing=["换插座"],
+                confirmed=confirmed,
+                entities=entities,
+                next_a1289_stage="R04",
+            )
+        if stage == "R04":
+            if self._looks_resolved(text):
+                return self._make_a1289_card(
+                    conversation_id,
+                    request,
+                    existing,
+                    next_state=ConversationState.GUIDE,
+                    missing=[],
+                    confirmed=confirmed,
+                    entities=entities,
+                    confirmation_type="resolved_check",
+                    pending_confirmation={"type": "resolved_check"},
+                    next_a1289_stage="R04",
+                )
+            return self._make_a1289_card(
+                conversation_id,
+                request,
+                existing,
+                next_state=ConversationState.ASK,
+                missing=["充电器或线材"],
+                confirmed=confirmed,
+                entities=entities,
+                pending_confirmation={"type": "accessories"},
+                next_a1289_stage="X",
+            )
+        if stage == "X":
+            acc = self._detect_accessories(text)
+            if acc is None:
+                return self._make_a1289_card(
+                    conversation_id,
+                    request,
+                    existing,
+                    next_state=ConversationState.ASK,
+                    missing=["充电器或线材"],
+                    confirmed=confirmed,
+                    entities=entities,
+                    pending_confirmation={"type": "accessories"},
+                    next_a1289_stage="X",
+                )
+            entities = dict(entities)
+            entities["a1289_accessories"] = acc
+            if acc == "none":
+                return self._make_a1289_card(
+                    conversation_id,
+                    request,
+                    existing,
+                    next_state=ConversationState.HANDOFF,
+                    missing=["配件交叉测试和完整记录"],
+                    confirmed=confirmed,
+                    entities=entities,
+                    next_a1289_stage="R07",
+                )
+            target = "R05" if acc in ("both", "charger_only") else "R06"
+            return self._make_a1289_card(
+                conversation_id,
+                request,
+                existing,
+                next_state=ConversationState.GUIDE,
+                missing=[],
+                confirmed=confirmed,
+                entities=entities,
+                next_a1289_stage=target,
+            )
+        if stage == "R05":
+            acc = existing.empathy_card.entities.get("a1289_accessories", "both")
+            if self._looks_resolved(text) and self._mentions_charger(text):
+                return self._make_a1289_card(
+                    conversation_id,
+                    request,
+                    existing,
+                    next_state=ConversationState.GUIDE,
+                    missing=[],
+                    confirmed=confirmed,
+                    entities=entities,
+                    confirmation_type="resolved_check",
+                    pending_confirmation={"type": "resolved_check"},
+                    next_a1289_stage="R05",
+                )
+            if acc == "both":
+                return self._make_a1289_card(
+                    conversation_id,
+                    request,
+                    existing,
+                    next_state=ConversationState.GUIDE,
+                    missing=[],
+                    confirmed=confirmed,
+                    entities=entities,
+                    next_a1289_stage="R06",
+                )
+            return self._make_a1289_card(
+                conversation_id,
+                request,
+                existing,
+                next_state=ConversationState.HANDOFF,
+                missing=["线材交叉测试"],
+                confirmed=confirmed,
+                entities=entities,
+                next_a1289_stage="R07",
+            )
+        if stage == "R06":
+            if self._looks_resolved(text) and self._mentions_cable(text):
+                return self._make_a1289_card(
+                    conversation_id,
+                    request,
+                    existing,
+                    next_state=ConversationState.GUIDE,
+                    missing=[],
+                    confirmed=confirmed,
+                    entities=entities,
+                    confirmation_type="resolved_check",
+                    pending_confirmation={"type": "resolved_check"},
+                    next_a1289_stage="R06",
+                )
+            return self._make_a1289_card(
+                conversation_id,
+                request,
+                existing,
+                next_state=ConversationState.HANDOFF,
+                missing=["C1、插座、充电器和线材均已测试，仍无法充电"],
+                confirmed=confirmed,
+                entities=entities,
+                next_a1289_stage="R07",
+            )
+        return None
+
+    @staticmethod
+    def _make_a1289_card(
+        conversation_id,
+        request,
+        existing,
+        next_state,
+        missing,
+        confirmed,
+        entities,
+        confirmation_type=None,
+        pending_confirmation=None,
+        next_a1289_stage=None,
+    ):
+        return EmpathyCard(
+            conversation_id=conversation_id,
+            surface_issue=request.message,
+            intent=Intent.USAGE,
+            intent_confidence=1.0,
+            intent_source="a1289_flow",
+            emotion=None,
+            scenario="a1289_charging_troubleshooting",
+            entities=entities,
+            confirmed_facts=confirmed,
+            inferences=[],
+            missing_information=missing,
+            risk_level=RiskLevel.LOW,
+            risk_reasons=[],
+            knowledge_refs=[],
+            next_state=next_state,
+            schema_version="a1289-v1",
+            confirmation_type=confirmation_type,
+            pending_confirmation=pending_confirmation,
+            next_a1289_stage=next_a1289_stage,
+        )
+
     def _build_card(
         self,
         conversation_id: str,
@@ -162,6 +508,94 @@ class ConversationOrchestrator:
             after_sales_terms = ("订单", "退款", "退货", "物流", "发票", "保修")
             if not any(term in text for term in after_sales_terms):
                 risk_terms = [existing.risk_lock_reason or "risk_lock_active"]
+
+        # ========== A1289 confirmation flow ==========
+        # 分支 1: 上一轮 pending 是 safety_precheck
+        if (
+            existing
+            and existing.pending_confirmation
+            and existing.pending_confirmation.get("type") == "safety_precheck"
+            and not risk_terms
+        ):
+            if self._is_safe_confirmation(text):
+                return self._make_a1289_card(
+                    conversation_id,
+                    request,
+                    existing,
+                    next_state=ConversationState.ASK,
+                    missing=["接通电源后屏幕是否有显示，输入功率是多少"],
+                    confirmed=[*(existing.empathy_card.confirmed_facts), request.message],
+                    entities=dict(existing.empathy_card.entities),
+                    confirmation_type=None,
+                    pending_confirmation=None,
+                    next_a1289_stage="R03",
+                )
+            risk_terms = ["safety_precheck_positive"]
+
+        # 分支 2: A1289 首次进入
+        if (
+            not risk_terms
+            and self._is_a1289_issue(text)
+            and (existing is None or not existing.a1289_stage)
+            and not (existing and existing.pending_confirmation)
+        ):
+            return self._make_a1289_card(
+                conversation_id,
+                request,
+                existing,
+                next_state=ConversationState.ASK,
+                missing=["设备是否有鼓包、异味、冒烟、进液或异常发热"],
+                confirmed=[request.message],
+                entities={},
+                confirmation_type="safety_precheck",
+                pending_confirmation={"type": "safety_precheck"},
+            )
+
+        # 分支 2.5: 同一消息内事实矛盾（MA01）
+        if existing and not risk_terms and self._has_internal_contradiction(text):
+            return self._make_a1289_card(
+                conversation_id,
+                request,
+                existing,
+                next_state=ConversationState.ASK,
+                missing=["请确认实际使用的接口，以及屏幕是否持续 0W、稳定输入还是反复中断"],
+                confirmed=[*(existing.empathy_card.confirmed_facts), request.message],
+                entities=dict(existing.empathy_card.entities),
+                confirmation_type="fact_correction",
+                pending_confirmation={"type": "contradiction"},
+                next_a1289_stage=existing.a1289_stage,
+            )
+
+        # 分支 3: fact correction
+        if existing and not risk_terms:
+            correction = self._detect_fact_correction(text, existing)
+            if correction:
+                withdrawn = self._apply_correction(conversation_id, existing, correction)
+                return self._make_a1289_card(
+                    conversation_id,
+                    request,
+                    existing,
+                    next_state=ConversationState.GUIDE,
+                    missing=[],
+                    confirmed=[*(existing.empathy_card.confirmed_facts), request.message],
+                    entities=dict(existing.empathy_card.entities),
+                    confirmation_type="fact_correction",
+                    pending_confirmation={
+                        "type": "fact_correction",
+                        "old": correction["old_facts"],
+                        "new": correction["new_facts"],
+                        "withdrawn_attempt_ids": withdrawn,
+                    },
+                    next_a1289_stage="R04",
+                )
+
+        # ========== 分支 4: A1289 已进入，推进 stage ==========
+        if existing and existing.a1289_stage and not risk_terms:
+            advanced = self._a1289_advance(conversation_id, request, existing, text)
+            if advanced is not None:
+                return advanced
+
+        # ========== 原有分支 ==========
         confirmed = list(
             dict.fromkeys(
                 [*(existing.empathy_card.confirmed_facts if existing else []), request.message]
@@ -258,6 +692,53 @@ class ConversationOrchestrator:
 
     @staticmethod
     def _consumer_copy(card: EmpathyCard) -> tuple[str, list[str]]:
+        if card.confirmation_type == "safety_precheck":
+            return (
+                "继续检查前，请先确认设备是否有鼓包、异味、冒烟、进液或异常发热？",
+                ["reply"],
+            )
+        if card.confirmation_type == "fact_correction":
+            pending = card.pending_confirmation or {}
+            if pending.get("type") == "contradiction":
+                return (
+                    "你描述的接口和屏幕表现存在不一致，我先不判断硬件问题。"
+                    "请确认实际使用的接口是 C1、C2 还是 USB-A？"
+                    "屏幕的实际表现是持续 0W、稳定输入，还是反复中断？",
+                    ["reply"],
+                )
+            new_facts = pending.get("new", {})
+            new_port = new_facts.get("charging_port", "C1")
+            return (
+                f"收到，已更正为 {new_port}。刚才的步骤先不用做。"
+                "A1289 自身充电需要使用 C1，请改接 C1，其他条件保持不变，"
+                "再观察屏幕是否出现输入功率。",
+                ["reply"],
+            )
+        if card.confirmation_type == "resolved_check":
+            return (
+                "请继续观察一会儿，确认输入功率是否能够保持稳定，没有再次变成 0W 或中断。",
+                ["reply"],
+            )
+        if card.confirmation_type is None and card.next_a1289_stage == "X":
+            return (
+                "你是否有其他可正常使用的充电器和 USB-C to USB-C 线？",
+                ["reply"],
+            )
+        if card.confirmation_type is None and card.next_a1289_stage == "R05":
+            return (
+                "请保持当前线材不变，只更换另一个可正常使用的充电器测试。",
+                ["reply"],
+            )
+        if card.confirmation_type is None and card.next_a1289_stage == "R06":
+            return (
+                "请保持当前充电器不变，只更换另一根 USB-C to USB-C 线测试。",
+                ["reply"],
+            )
+        if card.confirmation_type is None and card.next_a1289_stage == "R04":
+            return (
+                "请保持当前充电器和线材不变，更换一个确认有电的插座测试。",
+                ["reply"],
+            )
         if card.next_state == ConversationState.BLOCK:
             return (
                 "你描述的情况可能涉及设备安全风险。请立即停止使用并断开电源，不要拆机、"
@@ -266,6 +747,11 @@ class ConversationOrchestrator:
                 ["confirm_handoff", "decline_handoff"],
             )
         if card.next_state == ConversationState.ASK:
+            if "接通电源后屏幕是否有显示，输入功率是多少" in card.missing_information:
+                return (
+                    "接通电源后，屏幕是否有显示？输入功率是多少？",
+                    ["reply"],
+                )
             if "设备型号、供电指示状态或已经尝试过的方法" in card.missing_information:
                 return (
                     "为了只调整一个条件，请告诉我设备型号、接通电源后的指示状态，以及已经试过的方法；不确定也可以跳过。",
@@ -324,8 +810,7 @@ class ConversationOrchestrator:
     def _is_charging_issue_context(text: str, existing: StoredConversation | None) -> bool:
         charging_terms = ("无法充电", "充不上电", "没反应", "充电中断", "充电不稳定")
         return any(term in text for term in charging_terms) or bool(
-            existing
-            and any(term in existing.case.original_statement for term in charging_terms)
+            existing and any(term in existing.case.original_statement for term in charging_terms)
         )
 
     def _needs_charging_details(self, text: str, existing: StoredConversation | None) -> bool:
@@ -392,9 +877,7 @@ class ConversationOrchestrator:
         return conversation.case
 
     @staticmethod
-    def _infer_depends_on(
-        text: str, conversation: StoredConversation
-    ) -> dict[str, dict[str, Any]]:
+    def _infer_depends_on(text: str, conversation: StoredConversation) -> dict[str, dict[str, Any]]:
         """从 attempt 文本推断它依赖的 case 事实字段与当前版本。"""
         if not conversation.case or not conversation.case.revisions:
             return {}
@@ -429,9 +912,7 @@ class ConversationOrchestrator:
         ):
             raise ValueError("duplicate attempt")
         now = utc_now()
-        attempt_text = (
-            request.recommendation + " " + request.purpose + " " + request.instructions
-        )
+        attempt_text = request.recommendation + " " + request.purpose + " " + request.instructions
         depends_on = self._infer_depends_on(attempt_text, conversation)
         attempt = AttemptRecord(
             attempt_id=f"attempt_{uuid4().hex}",
