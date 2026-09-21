@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import re
 from datetime import timedelta
+from typing import Any
 from uuid import uuid4
 
 from smart_service_agent.config import Settings
@@ -355,14 +356,65 @@ class ConversationOrchestrator:
         )
         conversation.case.revisions.append(revision)
         conversation.case.current_revision = revision.revision
-        conversation.updated_at = utc_now()
+        changed_fields = set(request.facts.keys())
+        withdrawn_ids: list[str] = []
+        now = utc_now()
+        for attempt in conversation.attempts:
+            if attempt.status != "active":
+                continue
+            hit = [
+                f
+                for f in changed_fields
+                if f in attempt.depends_on
+                and attempt.depends_on[f].get("revision", revision.revision) < revision.revision
+            ]
+            if not hit:
+                continue
+            attempt.status = "withdrawn"
+            details = []
+            for f in hit:
+                old_dep = attempt.depends_on[f]
+                details.append(f"{f} {old_dep.get('value')} -> {request.facts[f]}")
+            attempt.withdrawn_reason = "fact_changed: " + "; ".join(details)
+            attempt.updated_at = now
+            withdrawn_ids.append(attempt.attempt_id)
+        conversation.updated_at = now
         self.repository.save_conversation(conversation)
         self.repository.add_audit(
             conversation_id,
             "case_revised",
-            {"revision": revision.revision, "reason": request.reason},
+            {
+                "revision": revision.revision,
+                "reason": request.reason,
+                "withdrawn_attempt_ids": withdrawn_ids,
+            },
         )
         return conversation.case
+
+    @staticmethod
+    def _infer_depends_on(
+        text: str, conversation: StoredConversation
+    ) -> dict[str, dict[str, Any]]:
+        """从 attempt 文本推断它依赖的 case 事实字段与当前版本。"""
+        if not conversation.case or not conversation.case.revisions:
+            return {}
+        current = conversation.case.revisions[-1]
+        facts = current.facts
+        revision = conversation.case.current_revision
+        field_patterns = {
+            "charging_port": ("C1", "C2", "USB-A", "USB A", "接口", "端口"),
+            "charger_model": ("充电器", "充电头", "适配器"),
+            "cable_model": ("线材", "充电线", "数据线", "USB-C to USB-C"),
+            "socket_state": ("插座", "墙插", "插排", "供电"),
+            "product": ("A1289", "737"),
+        }
+        result: dict[str, dict[str, Any]] = {}
+        for field, patterns in field_patterns.items():
+            if field not in facts:
+                continue
+            if any(p in text for p in patterns):
+                result[field] = {"value": facts[field], "revision": revision}
+        return result
 
     def create_attempt(
         self, conversation_id: str, request: AttemptCreateRequest
@@ -377,9 +429,14 @@ class ConversationOrchestrator:
         ):
             raise ValueError("duplicate attempt")
         now = utc_now()
+        attempt_text = (
+            request.recommendation + " " + request.purpose + " " + request.instructions
+        )
+        depends_on = self._infer_depends_on(attempt_text, conversation)
         attempt = AttemptRecord(
             attempt_id=f"attempt_{uuid4().hex}",
             conversation_id=conversation_id,
+            depends_on=depends_on,
             created_at=now,
             updated_at=now,
             **request.model_dump(),
