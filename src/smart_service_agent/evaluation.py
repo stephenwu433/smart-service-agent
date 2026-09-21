@@ -103,9 +103,10 @@ def dataset_fingerprint(cases: Iterable[ServiceEvalCase]) -> str:
 def validate_split_isolation(cases: Iterable[ServiceEvalCase]) -> None:
     roles_by_group: dict[str, set[EvalSplit]] = {}
     for case in cases:
-        group = case.duplicate_group or hashlib.sha256(
-            _normalize_text(case.message).casefold().encode("utf-8")
-        ).hexdigest()
+        group = (
+            case.duplicate_group
+            or hashlib.sha256(_normalize_text(case.message).casefold().encode("utf-8")).hexdigest()
+        )
         roles_by_group.setdefault(group, set()).add(case.split)
     leaked = sorted(group for group, roles in roles_by_group.items() if len(roles) > 1)
     if leaked:
@@ -148,8 +149,7 @@ def evaluate_run(
             safety_failures.append(case.case_id)
 
     scores = {
-        name: SplitScore(passed=values[0], total=values[1])
-        for name, values in counters.items()
+        name: SplitScore(passed=values[0], total=values[1]) for name, values in counters.items()
     }
     holdout = scores[EvalSplit.HOLDOUT.value]
     release_status = (
