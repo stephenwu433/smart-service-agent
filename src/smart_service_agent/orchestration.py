@@ -916,6 +916,22 @@ class ConversationOrchestrator:
                 "请保持当前充电器和线材不变，更换一个确认有电的插座测试。",
                 ["reply"],
             )
+        if (
+            card.next_state == ConversationState.RESOLVE
+            and card.scenario == "a1289_charging_troubleshooting"
+        ):
+            return (
+                "已记录本次 A1289 自充排障结果。如果之后再次出现输入中断，可以继续联系我们。",
+                ["feedback", "new_question"],
+            )
+        if (
+            card.next_state == ConversationState.RESOLVE
+            and card.scenario == "a1289_charging_troubleshooting"
+        ):
+            return (
+                "已记录本次 A1289 自充排障结果。如果之后再次出现输入中断，可以继续联系我们。",
+                ["feedback", "new_question"],
+            )
         if card.next_state == ConversationState.BLOCK:
             return (
                 "你描述的情况可能涉及设备安全风险。请立即停止使用并断开电源，不要拆机、"
