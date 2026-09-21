@@ -520,9 +520,9 @@ def test_ms03_both_tests_fail_to_handoff(tmp_path) -> None:
 def test_story2_cable_to_charger_correction(tmp_path) -> None:
     """故事 2：用户先说换过线，后更正为换过充电头，系统修正事实。"""
     client = make_client(tmp_path)
-    cid = client.post(
-        "/v1/conversations", json={"message": "A1289 接 C1 充不进去"}
-    ).json()["conversation_id"]
+    cid = client.post("/v1/conversations", json={"message": "A1289 接 C1 充不进去"}).json()[
+        "conversation_id"
+    ]
     client.post(f"/v1/conversations/{cid}/messages", json={"message": "没有"})
 
     # 建一条依赖 cable_model 的 attempt
@@ -569,18 +569,14 @@ def test_ma02_provider_timeout_during_risk_still_blocks(tmp_path) -> None:
             raise httpx.TimeoutException("test timeout")
 
     client = TestClient(create_app(MemoryRepository(), TimeoutProvider()))
-    body = client.post(
-        "/v1/conversations", json={"message": "A1289 充电时冒烟"}
-    ).json()
+    body = client.post("/v1/conversations", json={"message": "A1289 充电时冒烟"}).json()
     assert body["state"] == "BLOCK"
 
 
 def test_consumer_response_exposes_workflow_fields(tmp_path) -> None:
     """ConsumerResponse 暴露 next_attempt_id / confirmation_required 等字段。"""
     client = make_client(tmp_path)
-    body = client.post(
-        "/v1/conversations", json={"message": "A1289 接 C1 充不进去"}
-    ).json()
+    body = client.post("/v1/conversations", json={"message": "A1289 接 C1 充不进去"}).json()
     # 首次进入 A1289 流程，应返回 safety_precheck，confirmation_required=True
     assert body["confirmation_required"] is True
     assert body["state"] == "ASK"
@@ -599,13 +595,11 @@ def test_consumer_response_exposes_workflow_fields(tmp_path) -> None:
 def test_guide_auto_creates_attempt(tmp_path) -> None:
     """步骤闭环：GUIDE 状态自动建 Attempt，返回 next_attempt_id。"""
     client = make_client(tmp_path)
-    cid = client.post(
-        "/v1/conversations", json={"message": "A1289 接 C1 充不进去"}
-    ).json()["conversation_id"]
+    cid = client.post("/v1/conversations", json={"message": "A1289 接 C1 充不进去"}).json()[
+        "conversation_id"
+    ]
     client.post(f"/v1/conversations/{cid}/messages", json={"message": "没有"})
-    body = client.post(
-        f"/v1/conversations/{cid}/messages", json={"message": "屏幕 0W"}
-    ).json()
+    body = client.post(f"/v1/conversations/{cid}/messages", json={"message": "屏幕 0W"}).json()
     assert body["state"] == "GUIDE"
     assert body["next_attempt_id"] is not None
     attempts = client.get(f"/v1/conversations/{cid}/attempts").json()
@@ -615,9 +609,9 @@ def test_guide_auto_creates_attempt(tmp_path) -> None:
 def test_d03_uncertain_compatibility_goes_handoff(tmp_path) -> None:
     """D03：配件兼容性未知时，不做通电测试，记录未测试转人工。"""
     client = make_client(tmp_path)
-    cid = client.post(
-        "/v1/conversations", json={"message": "A1289 接 C1 充不进去"}
-    ).json()["conversation_id"]
+    cid = client.post("/v1/conversations", json={"message": "A1289 接 C1 充不进去"}).json()[
+        "conversation_id"
+    ]
     client.post(f"/v1/conversations/{cid}/messages", json={"message": "没有"})
     client.post(f"/v1/conversations/{cid}/messages", json={"message": "屏幕 0W"})
     client.post(f"/v1/conversations/{cid}/messages", json={"message": "换了插座还是不行"})
@@ -631,9 +625,7 @@ def test_d03_uncertain_compatibility_goes_handoff(tmp_path) -> None:
 def test_d09_manual_risk_lock_release(tmp_path) -> None:
     """D09：人工解除风险锁后，普通流程恢复。"""
     client = make_client(tmp_path)
-    cid = client.post(
-        "/v1/conversations", json={"message": "充电器冒烟"}
-    ).json()["conversation_id"]
+    cid = client.post("/v1/conversations", json={"message": "充电器冒烟"}).json()["conversation_id"]
     r1 = client.post(
         f"/v1/conversations/{cid}/messages",
         json={"message": "我现在想问订单退款"},
@@ -665,13 +657,11 @@ def test_d05_attachment_with_sufficient_text_proceeds(tmp_path) -> None:
 def test_skipped_unavailable_records_reason(tmp_path) -> None:
     """skipped_unavailable：记录用户无法执行的原因。"""
     client = make_client(tmp_path)
-    cid = client.post(
-        "/v1/conversations", json={"message": "A1289 接 C1 充不进去"}
-    ).json()["conversation_id"]
+    cid = client.post("/v1/conversations", json={"message": "A1289 接 C1 充不进去"}).json()[
+        "conversation_id"
+    ]
     client.post(f"/v1/conversations/{cid}/messages", json={"message": "没有"})
-    body = client.post(
-        f"/v1/conversations/{cid}/messages", json={"message": "屏幕 0W"}
-    ).json()
+    body = client.post(f"/v1/conversations/{cid}/messages", json={"message": "屏幕 0W"}).json()
     attempt_id = body["next_attempt_id"]
     assert attempt_id is not None
 

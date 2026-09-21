@@ -184,9 +184,7 @@ class ConversationOrchestrator:
         )
 
     @staticmethod
-    def _text_sufficient_for_flow(
-        text: str, existing: StoredConversation | None
-    ) -> bool:
+    def _text_sufficient_for_flow(text: str, existing: StoredConversation | None) -> bool:
         keywords = (
             "充不进",
             "无法充电",
@@ -293,9 +291,7 @@ class ConversationOrchestrator:
         conversation.case.revisions.append(new_revision)
         conversation.case.current_revision = new_rev_num
 
-        changed_fields = set(correction["old_facts"].keys()) | set(
-            correction["new_facts"].keys()
-        )
+        changed_fields = set(correction["old_facts"].keys()) | set(correction["new_facts"].keys())
         withdrawn_ids: list[str] = []
         for attempt in conversation.attempts:
             if attempt.status != "active":
@@ -313,9 +309,7 @@ class ConversationOrchestrator:
             for f in hit:
                 old_dep = attempt.depends_on[f]
                 if f in correction["new_facts"]:
-                    details.append(
-                        f"{f} {old_dep.get('value')} -> {correction['new_facts'][f]}"
-                    )
+                    details.append(f"{f} {old_dep.get('value')} -> {correction['new_facts'][f]}")
                 else:
                     details.append(f"{f} {old_dep.get('value')} removed")
             attempt.withdrawn_reason = "fact_changed: " + "; ".join(details)
@@ -333,9 +327,7 @@ class ConversationOrchestrator:
                 "withdrawn_attempt_ids": withdrawn_ids,
             },
         )
-        preserved_fact_ids = [
-            f for f in new_revision.facts if f not in changed_fields
-        ]
+        preserved_fact_ids = [f for f in new_revision.facts if f not in changed_fields]
         return {
             "withdrawn_attempt_ids": withdrawn_ids,
             "new_revision": new_rev_num,
@@ -431,9 +423,7 @@ class ConversationOrchestrator:
             return None
         rec, purpose, instr, target, exit_c = spec
         depends_on = (
-            self._infer_depends_on(f"{rec} {purpose} {instr}", existing)
-            if existing
-            else {}
+            self._infer_depends_on(f"{rec} {purpose} {instr}", existing) if existing else {}
         )
         now = utc_now()
         return AttemptRecord(
@@ -1139,9 +1129,7 @@ class ConversationOrchestrator:
         attempt.execution_status = request.execution_status
         attempt.observation = request.observation or request.skip_reason
         attempt.outcome = request.outcome or (
-            "unknown"
-            if request.execution_status in ("skipped", "skipped_unavailable")
-            else None
+            "unknown" if request.execution_status in ("skipped", "skipped_unavailable") else None
         )
         attempt.updated_at = utc_now()
         conversation.updated_at = attempt.updated_at
