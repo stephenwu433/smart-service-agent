@@ -1355,18 +1355,13 @@ class ConversationOrchestrator:
         skipped_attempts = [
             a.model_dump(mode="json")
             for a in conversation.attempts
-            if a.status == "active"
-            and a.execution_status in ("skipped", "skipped_unavailable")
+            if a.status == "active" and a.execution_status in ("skipped", "skipped_unavailable")
         ]
         withdrawn_attempts = [
-            a.model_dump(mode="json")
-            for a in conversation.attempts
-            if a.status == "withdrawn"
+            a.model_dump(mode="json") for a in conversation.attempts if a.status == "withdrawn"
         ]
         observations = [a.observation for a in conversation.attempts if a.observation]
-        untested_items = [
-            m for m in card.missing_information if m
-        ]
+        untested_items = [m for m in card.missing_information if m]
         package = HandoffPackage(
             conversation_id=conversation_id,
             original_messages=conversation.messages,

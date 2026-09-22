@@ -774,9 +774,7 @@ def test_handoff_package_includes_all_5_new_fields(tmp_path) -> None:
     client.post(f"/v1/conversations/{cid}/messages", json={"message": "都有"})
     client.post(f"/v1/conversations/{cid}/messages", json={"message": "换充电器还是不行"})
     client.post(f"/v1/conversations/{cid}/messages", json={"message": "换了线还是不行"})
-    client.post(
-        f"/v1/conversations/{cid}/messages", json={"message": "C1 无灯显，屏幕 0W"}
-    )
+    client.post(f"/v1/conversations/{cid}/messages", json={"message": "C1 无灯显，屏幕 0W"})
 
     view = client.get(f"/v1/agent/conversations/{cid}").json()
     pkg = view["handoff_package"]
