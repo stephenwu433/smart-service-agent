@@ -36,8 +36,18 @@
 
 ### Tests
 
-- 30 new P0 tests in `tests/test_a1289_workflow.py`; total 64 passing.
-- All original 34 tests preserved unchanged.
+- A1289 P0 与反馈闭环回归测试集中在 `tests/test_a1289_workflow.py`；当前全量 86 条通过。
+- 原有行为覆盖保留；与新版“明确更正直接生效”冲突的旧断言已同步更新。
+
+### Fixed
+
+- 明确事实更正直接写入新 Case revision 并局部撤回受影响步骤，不再要求消费者重复确认；
+  含“可能、好像、记不清”等不确定表达时仍进入 `ASK`。
+- A1289 对话反馈自动更新最近一条有效 Attempt 的执行状态、观察和结果；稳定性确认后将结果更新为
+  `resolved`。
+- 自动 GUIDE 复用尚未执行的相同步骤，避免重复创建 Attempt；A1289 自动步骤显式绑定当前
+  `charging_port`，确保接口事实更正能触发局部撤回。
+- `AttemptRecord.outcome` 与更新接口统一支持 `resolved`。
 
 ### Design decisions
 

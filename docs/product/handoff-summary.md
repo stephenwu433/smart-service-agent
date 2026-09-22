@@ -75,8 +75,8 @@ Attempt、Ticket 和测试骨架，只补本次 A1289 场景真正缺少的状�
 | 已经恢复 | `executed resolved` | 记录改变条件，询问用户是否确认解决 | 不能直接断言根因 |
 | 无法执行 | `skipped unavailable` | 记录原因和未排除项，可转人工 | 不能强迫借配件或标记已排除 |
 | 暂时无法判断 | `executed unknown` | 保留当前步骤，补问观察 | 不能自动进入下一步 |
-| 信息前后矛盾 | `pending correction` | 列出新旧事实并请求确认 | 不能擅自选一个事实 |
-| 确认更正 | `new fact revision` | 撤回受影响步骤，保留无关事实 | 不能清空全部历史 |
+| 明确事实更正 | `new fact revision` | 直接更新并撤回受影响步骤，保留无关事实 | 不能要求用户重复确认 |
+| 模糊或矛盾信息 | `ASK` | 列出待确认事实并追问 | 不能擅自选一个事实 |
 | 出现安全风险 | `BLOCK risk locked` | 停止通电排障，转人工或售后 | 不能因下一轮否认而自动解锁 |
 
 ### 事实更正与局部回退（核心差异化）
@@ -85,16 +85,12 @@ Attempt、Ticket 和测试骨架，只补本次 A1289 场景真正缺少的状�
 |---|---|---|
 | 1 旧事实 | 用户说使用 C1 | `charging_port C1 revision 1` |
 | 2 旧建议 | 系统给出依赖 C1 的交叉测试 | `attempt A depends_on charging_port revision 1` |
-| 3 用户更正 | 用户说刚才看错 实际是 C2 | `pending change C1 to C2` |
-| 4 二次确认 | 系统询问是否确认更正 | 旧事实暂不覆盖 |
-| 5 确认后更新 | 用户确认 | `charging_port C2 revision 2` |
-| 6 局部撤回 | 依赖旧 C1 的 attempt A 失效 | `status withdrawn reason fact changed` |
-| 7 继续 | 型号和安全信息仍保留，新增改接 C1 的步骤 | 新 attempt 使用 revision 2 |
+| 3 用户明确更正 | 用户说刚才看错，实际是 C2 | 直接写入 `charging_port C2 revision 2` |
+| 4 局部撤回 | 依赖旧 C1 的 attempt A 失效 | `status withdrawn reason fact changed` |
+| 5 继续 | 型号和安全信息仍保留，新增改接 C1 的步骤 | 新 attempt 使用 revision 2 |
 
-> 实现说明：本项目按本表第 3–5 步实现二次确认。用户跨轮更正时先创建
-> `pending_confirmation.type=fact_correction_pending` 并返回 `state=ASK`；用户回复肯定词后
-> 才应用更正、撤回依赖旧值的 Attempt、写 `case_revised` 审计。取消词则丢弃 pending，
-> 保留旧事实。
+> 实现说明：明确更正直接应用、撤回依赖旧值的 Attempt 并写 `case_revised` 审计；只有输入含
+> “可能、好像、记不清”等不确定措辞，或同一消息内事实矛盾时，才返回 `state=ASK`。
 
 ## 五 争议点与本版处理
 
@@ -145,8 +141,8 @@ Attempt、Ticket、Eval 和测试。但本次产品核心行为尚未实现，3 
 | 跨轮风险锁 | 主要按本轮消息判断，旧风险不会持续阻断 | `StoredConversation` 增加风险锁和解除来源；命中后后续轮仍 BLOCK |
 | 进液风险 | 高风险词包含漏液，但未覆盖用户侧进液表达 | 加入进液等语言变体并测试 |
 | 事实依赖 | Case 只有整份 revision，Attempt 没有 depends_on | Attempt 记录依赖的事实字段与版本 |
-| 局部回退 | Case 更正不会自动影响旧 Attempt | 更正确认后，只把受影响 Attempt 标为 withdrawn |
-| 步骤闭环 | GUIDE 只返回知识文本，Attempt 由独立 API 手工创建 | P0 至少让主流程自动建立或明确返回下一 Attempt |
+| 局部回退 | Case 更正不会自动影响旧 Attempt | 明确更正后，只把受影响 Attempt 标为 withdrawn |
+| 步骤闭环 | GUIDE 只返回知识文本，Attempt 由独立 API 手工创建 | 主流程自动建立下一 Attempt，并根据反馈更新记录 |
 | 反馈状态 | 只有 executed / skipped 和 improved / unchanged / worse / unknown | 覆盖无法执行、部分改善、已恢复、暂无法判断及下一步决策 |
 | 人工交接包 | 主要包含客服动作，未完整汇总消费者 Attempt | 加入已执行、未执行、撤回和观察结果 |
 | 知识内容 | 内置 3 条 demo 知识，不是 A1289 正式规则库 | 加入本次审核后的最小 A1289 知识和来源字段 |
@@ -156,8 +152,8 @@ Attempt、Ticket、Eval 和测试。但本次产品核心行为尚未实现，3 
 | 行为 | 最小输出字段 |
 |---|---|
 | 普通决策 | `state` `message` `evidence` `next_attempt` |
-| 事实更正待确认 | `old_fact` `new_fact` `affected_attempt_ids` `confirmation_required` |
-| 更正确认后 | `new_revision` `withdrawn_attempt_ids` `preserved_fact_ids` `next_attempt` |
+| 明确事实更正 | `old_fact` `new_fact` `new_revision` `withdrawn_attempt_ids` `preserved_fact_ids` `next_attempt` |
+| 模糊事实更正 | `state=ASK` `confirmation_required=false` |
 | 风险中断 | `state=BLOCK` `risk_lock=true` `reasons` `allowed_actions` |
 | 人工升级 | `confirmed_facts` `attempts` `observations` `untested_items` `risks` `suggested_next_step` |
 

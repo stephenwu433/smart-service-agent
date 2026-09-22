@@ -102,8 +102,8 @@ A1289 的 P0 行为在原有确定性编排器上叠加，不改变顶层 `Conve
   `resolved_check`，不新增顶层状态。
 - `safety_precheck`：A1289 首次进入时先问"是否有鼓包、异味、冒烟、进液、异常发热"，用户回
   否定词才推进到 R03。
-- `fact_correction`：跨轮明确更正进入 `pending_confirmation.type=fact_correction_pending`，
-  用户二次确认后才应用（`_apply_correction`）；同轮矛盾（MA01，`type=contradiction`）改为追问。
+- `fact_correction`：跨轮明确更正直接调用 `_apply_correction`，写入新 revision、撤回受影响步骤并
+  告知消费者影响；含不确定措辞或同轮矛盾（MA01，`type=contradiction`）时才追问。
 - `resolved_check`：用户报告恢复后继续问"是否稳定"，用户确认稳定才结案。
 
 **A1289 阶段机**
@@ -120,6 +120,11 @@ A1289 的 P0 行为在原有确定性编排器上叠加，不改变顶层 `Conve
   填 `depends_on`，把 `attempt_id` 写入 `EmpathyCard.next_attempt_id` 并转发到
   `ConsumerResponse.next_attempt_id`。
 - R04 / R05 / R06 各自有 recommendation / purpose / instructions 模板。
+- 自动创建前复用 recommendation 相同且仍为 `proposed` 的有效 Attempt；用户自然语言反馈会把
+  最近一条有效 Attempt 更新为 executed / skipped / skipped_unavailable 及相应 outcome，稳定性确认
+  后写入 `resolved`。
+- A1289 自动步骤除文案推断出的依赖外，还显式绑定当前 `charging_port`，使接口事实更正只撤回
+  受影响的排障步骤。
 
 **边界排除**
 
