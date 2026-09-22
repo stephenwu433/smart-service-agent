@@ -65,6 +65,12 @@ class EmpathyCard(BaseModel):
     knowledge_refs: list[KnowledgeReference] = Field(default_factory=list)
     next_state: ConversationState
     schema_version: str
+    confirmation_type: Optional[Literal["safety_precheck", "fact_correction", "resolved_check"]] = (
+        None
+    )
+    pending_confirmation: Optional[dict[str, Any]] = None
+    next_a1289_stage: Optional[str] = None
+    next_attempt_id: Optional[str] = None
 
 
 class Attachment(BaseModel):
@@ -96,6 +102,18 @@ class ConsumerResponse(BaseModel):
     event_id: Optional[str] = None
     event_status: Optional[str] = None
     estimated_response_at: Optional[datetime] = None
+    next_attempt_id: Optional[str] = None
+    confirmation_required: bool = False
+    old_fact: Optional[dict[str, Any]] = None
+    new_fact: Optional[dict[str, Any]] = None
+    affected_attempt_ids: list[str] = Field(default_factory=list)
+    new_revision: Optional[int] = None
+    withdrawn_attempt_ids: list[str] = Field(default_factory=list)
+    preserved_fact_ids: list[str] = Field(default_factory=list)
+    next_attempt: Optional[AttemptRecord] = None
+    risk_lock: bool = False
+    reasons: list[str] = Field(default_factory=list)
+    allowed_actions: list[str] = Field(default_factory=list)
 
 
 class HandoffDecision(BaseModel):
@@ -107,6 +125,11 @@ class FeedbackRequest(BaseModel):
     result_id: str
     resolved: bool
     comment: Optional[str] = Field(default=None, max_length=1000)
+
+
+class RiskLockReleaseRequest(BaseModel):
+    reason: str = Field(min_length=1, max_length=300)
+    operator: str = Field(min_length=1, max_length=100)
 
 
 class ServiceActionRequest(BaseModel):
@@ -145,9 +168,10 @@ class AttemptCreateRequest(BaseModel):
 
 
 class AttemptUpdateRequest(BaseModel):
-    execution_status: Literal["executed", "skipped"]
+    execution_status: Literal["executed", "skipped", "skipped_unavailable"]
     observation: Optional[str] = Field(default=None, max_length=1000)
-    outcome: Optional[Literal["improved", "unchanged", "worse", "unknown"]] = None
+    outcome: Optional[Literal["improved", "unchanged", "worse", "unknown", "resolved"]] = None
+    skip_reason: Optional[str] = Field(default=None, max_length=500)
 
 
 class AttemptRecord(BaseModel):
@@ -158,9 +182,12 @@ class AttemptRecord(BaseModel):
     instructions: str
     observation_target: str
     exit_condition: str
-    execution_status: Literal["proposed", "executed", "skipped"] = "proposed"
+    execution_status: Literal["proposed", "executed", "skipped", "skipped_unavailable"] = "proposed"
     observation: Optional[str] = None
     outcome: Optional[Literal["improved", "unchanged", "worse", "unknown"]] = None
+    depends_on: dict[str, dict[str, Any]] = Field(default_factory=dict)
+    status: Literal["active", "withdrawn"] = "active"
+    withdrawn_reason: Optional[str] = None
     created_at: datetime
     updated_at: datetime
 
@@ -210,6 +237,15 @@ class HandoffPackage(BaseModel):
     rule_version: str
     knowledge_version: str
     ticket: Optional[TicketRecord] = None
+    executed_attempts: list[dict[str, Any]] = Field(default_factory=list)
+    skipped_attempts: list[dict[str, Any]] = Field(default_factory=list)
+    withdrawn_attempts: list[dict[str, Any]] = Field(default_factory=list)
+    observations: list[str] = Field(default_factory=list)
+    untested_items: list[str] = Field(default_factory=list)
+    tested_items: list[str] = Field(default_factory=list)
+    unresolved_items: list[str] = Field(default_factory=list)
+    attempts: list[dict[str, Any]] = Field(default_factory=list)
+    risks: list[str] = Field(default_factory=list)
 
 
 class AgentConversationView(BaseModel):
@@ -246,5 +282,10 @@ class StoredConversation(BaseModel):
     case: Optional[CaseRecord] = None
     attempts: list[AttemptRecord] = Field(default_factory=list)
     ticket: Optional[TicketRecord] = None
+    risk_lock: bool = False
+    risk_lock_reason: Optional[str] = None
+    risk_lock_source: Optional[str] = None
+    a1289_stage: Optional[str] = None
+    pending_confirmation: Optional[dict[str, Any]] = None
     created_at: datetime
     updated_at: datetime

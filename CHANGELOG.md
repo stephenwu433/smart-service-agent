@@ -1,5 +1,60 @@
 # Changelog
 
+## [Unreleased] — A1289 P0 workflow
+
+### Added
+
+- Cross-turn risk lock on `StoredConversation` (`risk_lock`,
+  `risk_lock_reason`, `risk_lock_source`). Once a safety risk is detected,
+  subsequent turns stay in `BLOCK` until an unrelated after-sales topic
+  is raised. Manual release by an agent is not yet implemented.
+- Liquid-ingress and plastic-burn risk language variants (`进液`,
+  `洒到`, `烫得`, `烤焦`, etc.).
+- A1289 knowledge entries (`KB-A1289-CHARGING-001`,
+  `KB-A1289-PORT-001`). Demo source, not official policy.
+- `AttemptRecord.depends_on` records the Case fact fields and revisions
+  each attempt depends on, e.g.
+  `{"charging_port": {"value": "C1", "revision": 1}}`.
+- `AttemptRecord.status` / `withdrawn_reason` and partial rollback in
+  `revise_case` / `_apply_correction`: only attempts bound to the changed
+  fact are withdrawn; unrelated facts and history are preserved.
+- A1289 conversational flow with `a1289_stage` stages R03–R07 plus an X
+  accessory question, matching 规则表 Sheet2 (both / charger only /
+  cable only / none).
+- `EmpathyCard.confirmation_type` (`safety_precheck`,
+  `fact_correction`, `resolved_check`) and `pending_confirmation`.
+- Fact correction is accepted directly (per 2号 sample); the system
+  rewrites the case revision, withdraws affected attempts, writes an
+  audit entry, and continues from R04.
+- MA01 detection: contradictory port / display claims in one message
+  trigger a clarification ASK instead of a silent correction.
+- NB01: output-direction complaints (`接手机`, `给手机`, …) exit the
+  A1289 self-charge flow. NB02: non-A1289 models never enter it.
+- `HandoffPackage` now carries `executed_attempts`, `skipped_attempts`,
+  `withdrawn_attempts`, `observations`.
+- `outcome="resolved"` accepted on attempt update.
+
+### Tests
+
+- 30 new P0 tests in `tests/test_a1289_workflow.py`; total 64 passing.
+- All original 34 tests preserved unchanged.
+
+### Design decisions
+
+- Risk lock vs D09 and the pre-existing after-sales test:
+  - A denial of the risk ("现在没有风险了") does **not** release the lock
+    (D09).
+  - Switching to a fully unrelated after-sales topic
+    (`订单/退款/退货/物流/发票/保修`) is treated as a new request and does
+    not stay blocked, matching the pre-existing
+    `test_old_risk_message_does_not_block_a_new_unrelated_turn`.
+  - Both tests coexist; `test_d09_manual_risk_lock_release` uses a denial
+    message while `test_old_risk_message_does_not_block_a_new_unrelated_turn`
+    uses the order-refund message.
+- No real LLM / RAG, file processing, order system, auth or RBAC
+  integration in this iteration.
+
+
 All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),

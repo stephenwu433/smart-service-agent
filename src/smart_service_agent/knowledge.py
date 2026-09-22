@@ -42,6 +42,22 @@ class InMemoryKnowledgeBase:
                 "先只调整一个条件：使用已确认正常且参数匹配的充电线重试；观察设备是否开始稳定充电。无改善时进入下一步排查；出现异常发热、异味或鼓包时立即停止使用并转人工。",
                 "安克创新赛演示知识库：无法充电排查指引（非官方政策）",
             ),
+            KnowledgeItem(
+                "KB-A1289-CHARGING-001",
+                ("A1289", "737", "自充", "自身充电", "C1", "C2", "USB-A"),
+                "A1289 自充必须使用 C1 接口；C2 和 USB-A 仅支持输出，不能用于自充。"
+                "排查时先确认使用 C1 和随附 USB-C to USB-C 线，"
+                "再保持充电器不变更换已知正常插座。"
+                "每次只改变一个条件，并记录在哪个条件变化后恢复。",
+                "A1289 比赛演示知识库：自充接口与排查（非官方政策）",
+            ),
+            KnowledgeItem(
+                "KB-A1289-PORT-001",
+                ("A1289", "接口", "C1", "C2", "USB-A", "输入", "输出"),
+                "A1289 的 C1 支持输入和输出（输入最高 140W）；"
+                "C2 仅输出；USB-A 仅输出（最高 18W）。",
+                "A1289 比赛演示知识库：接口能力（非官方政策）",
+            ),
         )
 
     def search(
@@ -59,7 +75,15 @@ class InMemoryKnowledgeBase:
             for item in self._items
             if any(keyword.lower() in normalized for keyword in item.keywords)
         ]
-        charging_terms = ("无法充电", "充不上电", "没反应", "充电中断", "充电不稳定")
+        charging_terms = (
+            "无法充电",
+            "充不上电",
+            "没反应",
+            "充电中断",
+            "充电不稳定",
+            "自充",
+            "A1289",
+        )
         if any(term in normalized for term in charging_terms):
             ranked.sort(key=lambda item: item.knowledge_id != "KB-CHARGING-001")
         return [

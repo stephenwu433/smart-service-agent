@@ -43,6 +43,66 @@ response 只包含消费者可见的自然语言、状态、依据与可执行�
 - `PATCH /v1/conversations/{conversation_id}/attempts/{attempt_id}`：分别记录执行或跳过、观察内容
   和结果；执行过的建议没有观察内容时返回 `422`。
 
+### A1289 自充排查流程（P0）
+
+A1289 是 P0 里唯一进入主排障流程的型号。触发条件：当前 `message` 或 Case 原话包含 `A1289` 或
+`737`，且不含对外供电词（`接手机`、`给手机`、`给设备供电`、`对外供电`、`输出`）。不满足触发条件
+的请求不进本流程，退到原有的 `RESOLVE` / `HANDOFF` / `BLOCK`。
+
+流程用 `a1289_stage` 字段表达阶段（`R03`、`R04`、`X`、`R05`、`R06`、`R07`），不新增顶层
+`ConversationState`。顶层状态仍为 `GUIDE` / `RESOLVE` / `ASK` / `HANDOFF` / `BLOCK`。
+
+`EmpathyCard` 新增字段：
+
+- `confirmation_type`：`safety_precheck` | `fact_correction` | `resolved_check`。
+- `pending_confirmation`：含 `type`、`old`、`new`、`withdrawn_attempt_ids`、`new_revision`、`preserved_fact_ids`。
+- `next_a1289_stage`：下一个 stage 标识；`__clear__` 表示清空。
+- `next_attempt_id`：步骤闭环自动创建的 Attempt ID。
+
+`ConsumerResponse` 新增字段：
+
+- `next_attempt_id`、`confirmation_required`
+- `old_fact`、`new_fact`、`affected_attempt_ids`
+- `new_revision`、`withdrawn_attempt_ids`、`preserved_fact_ids`
+
+`AttemptRecord` 新增字段：
+
+- `depends_on`：`{field: {"value": v, "revision": r}}`，记录该 attempt 依赖的 Case 事实。
+- `status`：`active` | `withdrawn`。
+- `withdrawn_reason`：如 `fact_changed: charging_port C1 -> C2`。
+
+`AttemptUpdateRequest` 新增：
+
+- `execution_status` 接受 `skipped_unavailable`。
+- `skip_reason`：用户无法执行该步骤时的原因。
+
+`HandoffPackage` 新增：`executed_attempts`、`skipped_attempts`、`withdrawn_attempts`、`observations`。
+
+**人工解除风险锁**：
+
+`POST /v1/agent/conversations/{conversation_id}/risk-lock/release`
+
+    {"reason": "已完成风险处理", "operator": "agent-001"}
+
+响应为更新后的 `StoredConversation`，`risk_lock=false`。D09：普通流程不因用户下一轮否认自动
+恢复；只有人工明确解除后才恢复。
+
+**事实更正**（按交接文档第 5 页，二次确认）：
+
+- 跨轮明确更正：用户在同一轮内表达"说错 / 实际是 / 其实"等触发词，且出现新事实值 →
+  系统先返回 `confirmation_type=fact_correction` 且
+  `pending_confirmation.type=fact_correction_pending`，`state=ASK`，询问"确认更正吗？"。
+  用户回复肯定词（`确认` / `是` / `对` / `没错` / `更正` / `好` / `是的` / `确定`）后才更新
+  Case revision，撤回依赖旧值的 Attempt，写出 `case_revised` 审计，并给出下一步。
+  用户回复取消词（`取消` / `不更正` / `算了` / `不用` / `不对` / `不改`）则丢弃 pending，
+  保留旧事实。
+- 同轮矛盾：同一消息内出现 ≥2 个端口 + 犹豫词（`不对`、`可能`、`也许`、`一会儿`、`又`、
+  `不确定`）→ 返回 `confirmation_type=fact_correction` 且
+  `pending_confirmation.type=contradiction`，进入追问 `ASK`，不直接更正。
+
+**附件可选（D05）**：若 `message` 含充不进/无法充电/A1289/737 等关键词，即使带附件也走正常
+流程；否则保持原有"无法读取附件 + 转人工"分支。
+
 ### 人工交接和反馈
 
 - `POST /v1/conversations/{conversation_id}/handoff`：记录用户是否同意转人工；同意时使用
