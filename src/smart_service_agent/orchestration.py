@@ -162,6 +162,12 @@ class ConversationOrchestrator:
             "safety_precheck",
             "resolved_check",
         )
+        next_attempt_obj = None
+        if card.next_attempt_id:
+            next_attempt_obj = next(
+                (a for a in attempts_list if a.attempt_id == card.next_attempt_id),
+                None,
+            )
         return ConsumerResponse(
             conversation_id=conversation_id,
             result_id=result_id,
@@ -181,6 +187,10 @@ class ConversationOrchestrator:
             new_revision=pending.get("new_revision"),
             withdrawn_attempt_ids=pending.get("withdrawn_attempt_ids", []),
             preserved_fact_ids=pending.get("preserved_fact_ids", []),
+            next_attempt=next_attempt_obj,
+            risk_lock=stored.risk_lock,
+            reasons=list(card.risk_reasons),
+            allowed_actions=list(actions),
         )
 
     @staticmethod
@@ -1387,6 +1397,8 @@ class ConversationOrchestrator:
             withdrawn_attempts=withdrawn_attempts,
             observations=observations,
             untested_items=untested_items,
+            attempts=[a.model_dump(mode="json") for a in conversation.attempts],
+            risks=list(card.risk_reasons),
         )
         return AgentConversationView(
             handoff_package=package,

@@ -110,6 +110,10 @@ class ConsumerResponse(BaseModel):
     new_revision: Optional[int] = None
     withdrawn_attempt_ids: list[str] = Field(default_factory=list)
     preserved_fact_ids: list[str] = Field(default_factory=list)
+    next_attempt: Optional[AttemptRecord] = None
+    risk_lock: bool = False
+    reasons: list[str] = Field(default_factory=list)
+    allowed_actions: list[str] = Field(default_factory=list)
 
 
 class HandoffDecision(BaseModel):
@@ -238,6 +242,8 @@ class HandoffPackage(BaseModel):
     withdrawn_attempts: list[dict[str, Any]] = Field(default_factory=list)
     observations: list[str] = Field(default_factory=list)
     untested_items: list[str] = Field(default_factory=list)
+    attempts: list[dict[str, Any]] = Field(default_factory=list)
+    risks: list[str] = Field(default_factory=list)
 
 
 class AgentConversationView(BaseModel):

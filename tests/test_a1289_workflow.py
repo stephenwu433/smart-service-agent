@@ -786,3 +786,48 @@ def test_handoff_package_includes_all_5_new_fields(tmp_path) -> None:
         "untested_items",
     ):
         assert key in pkg, key
+
+
+def test_consumer_response_exposes_next_attempt_object(tmp_path) -> None:
+    """普通决策：next_attempt 返回完整对象，不只是 ID。"""
+    client = make_client(tmp_path)
+    cid = client.post("/v1/conversations", json={"message": "A1289 接 C1 充不进去"}).json()[
+        "conversation_id"
+    ]
+    client.post(f"/v1/conversations/{cid}/messages", json={"message": "没有"})
+    body = client.post(f"/v1/conversations/{cid}/messages", json={"message": "屏幕 0W"}).json()
+    assert body["state"] == "GUIDE"
+    assert body["next_attempt"] is not None
+    assert body["next_attempt"]["attempt_id"] == body["next_attempt_id"]
+    assert body["next_attempt"]["recommendation"]
+    assert body["next_attempt"]["instructions"]
+
+
+def test_consumer_response_exposes_risk_lock_and_reasons_on_block(tmp_path) -> None:
+    """风险中断：state=BLOCK + risk_lock=true + reasons + allowed_actions。"""
+    client = make_client(tmp_path)
+    body = client.post("/v1/conversations", json={"message": "充电器冒烟"}).json()
+    assert body["state"] == "BLOCK"
+    assert body["risk_lock"] is True
+    assert body["reasons"]
+    assert any("冒烟" in r for r in body["reasons"])
+    assert "allowed_actions" in body
+    assert "available_actions" in body
+    assert body["allowed_actions"] == body["available_actions"]
+
+
+def test_handoff_package_exposes_attempts_and_risks(tmp_path) -> None:
+    """人工升级：HandoffPackage 含 attempts 和 risks 别名。"""
+    client = make_client(tmp_path)
+    body = client.post("/v1/conversations", json={"message": "充电器冒烟"}).json()
+    cid = body["conversation_id"]
+    client.post(
+        f"/v1/conversations/{cid}/handoff",
+        json={"accepted": True, "idempotency_key": "risk-alias-001"},
+    )
+    view = client.get(f"/v1/agent/conversations/{cid}").json()
+    pkg = view["handoff_package"]
+    assert "attempts" in pkg
+    assert "risks" in pkg
+    assert pkg["risks"]
+    assert any("冒烟" in r for r in pkg["risks"])
