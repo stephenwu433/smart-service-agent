@@ -97,6 +97,7 @@ class ConversationOrchestrator:
     ) -> ConsumerResponse:
         now = utc_now()
         messages = [*existing.messages, request.message] if existing else [request.message]
+        attempt_feedback = self._record_attempt_feedback(existing, request.message)
         card = self._build_card(conversation_id, request, existing)
         result_id = f"result_{uuid4().hex}"
         attempts_list = list(existing.attempts) if existing else []
@@ -107,8 +108,12 @@ class ConversationOrchestrator:
         ):
             auto_attempt = self._build_auto_attempt(conversation_id, card, existing)
             if auto_attempt is not None:
-                attempts_list.append(auto_attempt)
-                card.next_attempt_id = auto_attempt.attempt_id
+                reusable_attempt = self._find_reusable_attempt(attempts_list, auto_attempt)
+                if reusable_attempt is None:
+                    attempts_list.append(auto_attempt)
+                    card.next_attempt_id = auto_attempt.attempt_id
+                else:
+                    card.next_attempt_id = reusable_attempt.attempt_id
         response_text, actions = self._consumer_copy(card)
         stored = StoredConversation(
             conversation_id=conversation_id,
@@ -157,6 +162,12 @@ class ConversationOrchestrator:
                 "result_id": result_id,
             },
         )
+        if attempt_feedback is not None:
+            self.repository.add_audit(
+                conversation_id,
+                "attempt_updated_from_conversation",
+                attempt_feedback,
+            )
         pending = card.pending_confirmation or {}
         confirmation_required = card.confirmation_type in (
             "safety_precheck",
@@ -284,6 +295,22 @@ class ConversationOrchestrator:
             "old_facts": {"charging_port": old_port},
             "new_facts": {"charging_port": new_port},
         }
+
+    @staticmethod
+    def _is_ambiguous_fact_correction(text: str, existing: StoredConversation) -> bool:
+        """含不确定措辞的事实变化必须澄清，不能直接覆盖已有事实。"""
+        if not existing.case or not existing.case.revisions:
+            return False
+        uncertainty = ("可能", "好像", "也许", "不确定", "记不清", "应该")
+        if not any(marker in text for marker in uncertainty):
+            return False
+        current_port = existing.case.revisions[-1].facts.get("charging_port")
+        mentioned_ports = {
+            "USB-A" if port == "USB A" else port
+            for port in ("C1", "C2", "USB-A", "USB A")
+            if port in text
+        }
+        return bool(mentioned_ports and (current_port is None or mentioned_ports != {current_port}))
 
     def _apply_correction(
         self,
@@ -440,6 +467,18 @@ class ConversationOrchestrator:
 
     def _build_auto_attempt(self, conversation_id, card, existing):
         stage = card.next_a1289_stage
+        if card.confirmation_type == "resolved_check":
+            return None
+        if card.confirmation_type == "fact_correction":
+            spec = (
+                "改接 C1 测试",
+                "纠正自充接口",
+                "将输入线改接到 A1289 的 C1 接口，其他条件保持不变",
+                "屏幕是否出现并保持输入功率",
+                "观察到稳定输入",
+            )
+        else:
+            spec = None
         specs = {
             "R04": (
                 "更换插座测试",
@@ -463,13 +502,23 @@ class ConversationOrchestrator:
                 "观察到稳定输入",
             ),
         }
-        spec = specs.get(stage)
+        spec = spec or specs.get(stage)
         if spec is None:
             return None
         rec, purpose, instr, target, exit_c = spec
         depends_on = (
             self._infer_depends_on(f"{rec} {purpose} {instr}", existing) if existing else {}
         )
+        if existing and existing.case and existing.case.revisions:
+            current = existing.case.revisions[-1]
+            if current.facts.get("product") == "A1289" and "charging_port" in current.facts:
+                depends_on.setdefault(
+                    "charging_port",
+                    {
+                        "value": current.facts["charging_port"],
+                        "revision": existing.case.current_revision,
+                    },
+                )
         now = utc_now()
         return AttemptRecord(
             attempt_id=f"attempt_{uuid4().hex}",
@@ -483,6 +532,114 @@ class ConversationOrchestrator:
             created_at=now,
             updated_at=now,
         )
+
+    @staticmethod
+    def _find_reusable_attempt(
+        attempts: list[AttemptRecord], candidate: AttemptRecord
+    ) -> AttemptRecord | None:
+        normalized = "".join(candidate.recommendation.lower().split())
+        for attempt in reversed(attempts):
+            if attempt.status != "active" or attempt.execution_status != "proposed":
+                continue
+            if "".join(attempt.recommendation.lower().split()) == normalized:
+                return attempt
+        return None
+
+    def _record_attempt_feedback(
+        self, existing: StoredConversation | None, text: str
+    ) -> dict[str, Any] | None:
+        """把自然语言反馈同步到最近一条有效 Attempt，保持对话与审计记录一致。"""
+        if existing is None or not existing.attempts:
+            return None
+        if existing.risk_lock or self._active_risk_terms(text):
+            return None
+        if self._detect_fact_correction(text, existing) or self._is_ambiguous_fact_correction(
+            text, existing
+        ):
+            return None
+
+        pending = existing.pending_confirmation or {}
+        if pending.get("type") == "resolved_check":
+            if not self._is_stable_confirmation(text):
+                return None
+            attempt = next(
+                (
+                    item
+                    for item in reversed(existing.attempts)
+                    if item.status == "active"
+                    and item.execution_status == "executed"
+                    and item.outcome == "improved"
+                ),
+                None,
+            )
+            if attempt is None:
+                return None
+            attempt.outcome = "resolved"
+            attempt.observation = f"{attempt.observation or ''}；稳定性确认：{text}".strip("；")
+            attempt.updated_at = utc_now()
+            return {
+                "attempt_id": attempt.attempt_id,
+                "execution_status": attempt.execution_status,
+                "outcome": attempt.outcome,
+                "source": "conversation_feedback",
+            }
+
+        attempt = next(
+            (
+                item
+                for item in reversed(existing.attempts)
+                if item.status == "active"
+                and (
+                    item.execution_status == "proposed"
+                    or (item.execution_status == "executed" and item.outcome == "unknown")
+                )
+            ),
+            None,
+        )
+        if attempt is None:
+            return None
+
+        unavailable_markers = (
+            "无法执行",
+            "不能执行",
+            "没法",
+            "没有其他",
+            "找不到",
+            "不具备",
+        )
+        skip_markers = ("跳过", "先不试", "不想试", "暂不执行")
+        partial_markers = ("好一点", "有改善", "部分改善", "稍微")
+        failure_markers = ("还是不行", "仍然不行", "没有改善", "仍是", "还是 0W", "仍然 0W")
+        unknown_markers = ("暂时无法判断", "看不出来", "不确定结果", "观察不出来")
+
+        if any(marker in text for marker in unavailable_markers):
+            execution_status = "skipped_unavailable"
+            outcome = "unknown"
+        elif any(marker in text for marker in skip_markers):
+            execution_status = "skipped"
+            outcome = "unknown"
+        elif any(marker in text for marker in unknown_markers):
+            execution_status = "executed"
+            outcome = "unknown"
+        elif self._looks_resolved(text) or any(marker in text for marker in partial_markers):
+            execution_status = "executed"
+            outcome = "improved"
+        elif any(marker in text for marker in failure_markers):
+            execution_status = "executed"
+            outcome = "unchanged"
+        else:
+            return None
+
+        attempt.execution_status = execution_status
+        attempt.observation = text
+        attempt.outcome = outcome
+        attempt.updated_at = utc_now()
+        return {
+            "attempt_id": attempt.attempt_id,
+            "execution_status": execution_status,
+            "outcome": outcome,
+            "source": "conversation_feedback",
+        }
 
     def _a1289_advance(self, conversation_id, request, existing, text):
         pending = existing.pending_confirmation or {}
@@ -515,6 +672,32 @@ class ConversationOrchestrator:
             )
 
         stage = existing.a1289_stage
+        if stage in {"R04", "R05", "R06"} and any(
+            marker in text for marker in ("还没做", "还没试", "尚未执行", "未执行")
+        ):
+            return self._make_a1289_card(
+                conversation_id,
+                request,
+                existing,
+                next_state=ConversationState.GUIDE,
+                missing=[],
+                confirmed=confirmed,
+                entities=entities,
+                next_a1289_stage=stage,
+            )
+        if stage in {"R04", "R05", "R06"} and any(
+            marker in text for marker in ("暂时无法判断", "看不出来", "不确定结果", "观察不出来")
+        ):
+            return self._make_a1289_card(
+                conversation_id,
+                request,
+                existing,
+                next_state=ConversationState.ASK,
+                missing=["执行后屏幕或输入功率的实际变化"],
+                confirmed=confirmed,
+                entities=entities,
+                next_a1289_stage=stage,
+            )
         if stage == "R03":
             return self._make_a1289_card(
                 conversation_id,
@@ -879,25 +1062,42 @@ class ConversationOrchestrator:
                 next_a1289_stage=existing.a1289_stage,
             )
 
-        # 分支 3: fact correction — 先创建 pending，等待二次确认（D 文档第 5 页）
+        # 分支 3: 模糊更正先澄清；明确更正直接生效并告知影响。
         if existing and not risk_terms:
-            correction = self._detect_fact_correction(text, existing)
-            if correction:
+            if self._is_ambiguous_fact_correction(text, existing):
                 return self._make_a1289_card(
                     conversation_id,
                     request,
                     existing,
                     next_state=ConversationState.ASK,
-                    missing=["请确认是否更正"],
+                    missing=["请确认实际使用的接口"],
+                    confirmed=[*(existing.empathy_card.confirmed_facts), request.message],
+                    entities=dict(existing.empathy_card.entities),
+                    confirmation_type="fact_correction",
+                    pending_confirmation={"type": "contradiction"},
+                    next_a1289_stage=existing.a1289_stage,
+                )
+            correction = self._detect_fact_correction(text, existing)
+            if correction:
+                result = self._apply_correction(conversation_id, existing, correction)
+                return self._make_a1289_card(
+                    conversation_id,
+                    request,
+                    existing,
+                    next_state=ConversationState.GUIDE,
+                    missing=[],
                     confirmed=[*(existing.empathy_card.confirmed_facts), request.message],
                     entities=dict(existing.empathy_card.entities),
                     confirmation_type="fact_correction",
                     pending_confirmation={
-                        "type": "fact_correction_pending",
+                        "type": "fact_correction",
                         "old": correction["old_facts"],
                         "new": correction["new_facts"],
+                        "withdrawn_attempt_ids": result["withdrawn_attempt_ids"],
+                        "new_revision": result["new_revision"],
+                        "preserved_fact_ids": result["preserved_fact_ids"],
                     },
-                    next_a1289_stage=existing.a1289_stage,
+                    next_a1289_stage="R04",
                 )
 
         # ========== 分支 4: A1289 已进入，推进 stage ==========
@@ -1151,6 +1351,16 @@ class ConversationOrchestrator:
     def _initial_case(conversation_id: str, request: ConversationRequest) -> CaseRecord:
         now = utc_now()
         facts = {"product": request.product} if request.product else {}
+        if "A1289" in request.message or "737" in request.message:
+            facts.setdefault("product", "A1289")
+        ports = [
+            "USB-A" if port == "USB A" else port
+            for port in ("C1", "C2", "USB-A", "USB A")
+            if port in request.message
+        ]
+        ports = list(dict.fromkeys(ports))
+        if len(ports) == 1:
+            facts["charging_port"] = ports[0]
         revision = CaseRevision(
             revision=1,
             facts=facts,
@@ -1487,9 +1697,7 @@ class ConversationOrchestrator:
         unresolved_items = [
             a.recommendation
             for a in conversation.attempts
-            if a.status == "active"
-            and a.execution_status == "executed"
-            and a.outcome != "resolved"
+            if a.status == "active" and a.execution_status == "executed" and a.outcome != "resolved"
         ]
         package = HandoffPackage(
             conversation_id=conversation_id,

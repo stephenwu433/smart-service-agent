@@ -179,24 +179,17 @@ def test_a1289_fact_correction_revises_and_withdraws(tmp_path) -> None:
     assert attempt["status"] == "active"
     assert "charging_port" in attempt["depends_on"]
 
-    # 用户更正 C1 → C2，系统先返回 pending
-    pending = client.post(
-        f"/v1/conversations/{cid}/messages",
-        json={"message": "我之前说错了，我接的是 C2，不是 C1"},
-    ).json()
-    assert pending["state"] == "ASK"
-    assert "确认" in pending["message"]
-    assert pending["old_fact"] == {"charging_port": "C1"}
-    assert pending["new_fact"] == {"charging_port": "C2"}
-
-    # 用户二次确认
+    # 用户明确更正 C1 → C2，系统直接生效，不要求二次确认
     corrected = client.post(
         f"/v1/conversations/{cid}/messages",
-        json={"message": "确认"},
+        json={"message": "我之前说错了，我接的是 C2，不是 C1"},
     ).json()
     assert corrected["state"] == "GUIDE"
     assert "已更正为 C2" in corrected["message"]
     assert "改接 C1" in corrected["message"]
+    assert corrected["confirmation_required"] is False
+    assert corrected["old_fact"] == {"charging_port": "C1"}
+    assert corrected["new_fact"] == {"charging_port": "C2"}
 
     attempts = client.get(f"/v1/conversations/{cid}/attempts").json()
     a = next(x for x in attempts if x["attempt_id"] == attempt["attempt_id"])
@@ -217,10 +210,6 @@ def test_a1289_fact_correction_writes_audit(tmp_path) -> None:
     client.post(
         f"/v1/conversations/{cid}/messages",
         json={"message": "我之前说错了，我接的是 C2，不是 C1"},
-    )
-    client.post(
-        f"/v1/conversations/{cid}/messages",
-        json={"message": "确认"},
     )
 
     view = client.get(f"/v1/agent/conversations/{cid}").json()
@@ -429,21 +418,21 @@ def test_ma01_internal_contradiction_asks_clarification(tmp_path) -> None:
     assert "已更正为" not in body["message"]
 
 
-def test_ma01_cross_turn_correction_goes_pending(tmp_path) -> None:
-    """跨轮明确更正进入 pending，不误判为 MA01 矛盾。"""
+def test_ma01_cross_turn_clear_correction_applies_directly(tmp_path) -> None:
+    """跨轮明确更正直接生效，不误判为 MA01 矛盾。"""
     client = make_client(tmp_path)
     cid = client.post("/v1/conversations", json={"message": "A1289 接 C1 充不进去"}).json()[
         "conversation_id"
     ]
     client.post(f"/v1/conversations/{cid}/messages", json={"message": "没有"})
-    # 跨轮明确更正 -> pending，不触发矛盾追问
-    pending = client.post(
+    corrected = client.post(
         f"/v1/conversations/{cid}/messages",
         json={"message": "我之前说错了，我接的是 C2，不是 C1"},
     ).json()
-    assert pending["state"] == "ASK"
-    assert "确认" in pending["message"]
-    assert "不一致" not in pending["message"]
+    assert corrected["state"] == "GUIDE"
+    assert "已更正为 C2" in corrected["message"]
+    assert corrected["confirmation_required"] is False
+    assert "不一致" not in corrected["message"]
 
 
 def test_rv02_liquid_plus_heat_blocks_both_terms(tmp_path) -> None:
@@ -462,26 +451,18 @@ def test_rv02_liquid_plus_heat_blocks_both_terms(tmp_path) -> None:
 
 
 def test_ms01_c2_to_c1_recovery_full_flow(tmp_path) -> None:
-    """MS01: 用户接 C2，系统指导改接 C1，用户确认恢复。"""
+    """MS01: 用户把 C1 更正为 C2，系统指导改接 C1，用户确认恢复。"""
     client = make_client(tmp_path)
-    cid = client.post("/v1/conversations", json={"message": "A1289 接 C2 充不进去"}).json()[
+    cid = client.post("/v1/conversations", json={"message": "A1289 接 C1 充不进去"}).json()[
         "conversation_id"
     ]
     # 用户先否认风险
     client.post(f"/v1/conversations/{cid}/messages", json={"message": "没有"})
 
-    # 用户更正接口，先进入 pending
-    pending = client.post(
-        f"/v1/conversations/{cid}/messages",
-        json={"message": "我之前说错了，我接的是 C2，不是 C1"},
-    ).json()
-    assert pending["state"] == "ASK"
-    assert "确认" in pending["message"]
-
-    # 用户二次确认后系统给出改接 C1 指引
+    # 用户明确更正接口，直接生效
     corrected = client.post(
         f"/v1/conversations/{cid}/messages",
-        json={"message": "确认"},
+        json={"message": "我之前说错了，我接的是 C2，不是 C1"},
     ).json()
     assert corrected["state"] == "GUIDE"
     assert "C1" in corrected["message"]
@@ -585,23 +566,134 @@ def test_story2_cable_to_charger_correction(tmp_path) -> None:
     assert attempt["status"] == "active"
     assert "cable_model" in attempt["depends_on"]
 
-    # 用户更正：之前说换过线，其实是换过充电头。先 pending。
-    pending = client.post(
+    # 用户明确更正：之前说换过线，其实是换过充电头。直接生效。
+    corrected = client.post(
         f"/v1/conversations/{cid}/messages",
         json={"message": "我之前说换过线，其实是换过充电头"},
     ).json()
-    assert pending["state"] == "ASK"
-    assert "确认" in pending["message"]
-    assert pending["old_fact"] == {"cable_model": "换过"}
-    assert pending["new_fact"] == {"charger_model": "换过"}
-
-    # 用户二次确认
-    corrected = client.post(
-        f"/v1/conversations/{cid}/messages",
-        json={"message": "确认"},
-    ).json()
+    assert corrected["state"] == "GUIDE"
+    assert corrected["old_fact"] == {"cable_model": "换过"}
+    assert corrected["new_fact"] == {"charger_model": "换过"}
     assert attempt["attempt_id"] in corrected["withdrawn_attempt_ids"]
     assert corrected["new_revision"] is not None
+
+
+def test_ambiguous_fact_change_still_asks_for_clarification(tmp_path) -> None:
+    client = make_client(tmp_path)
+    cid = client.post("/v1/conversations", json={"message": "A1289 接 C1 充不进去"}).json()[
+        "conversation_id"
+    ]
+    client.post(f"/v1/conversations/{cid}/messages", json={"message": "没有"})
+    body = client.post(
+        f"/v1/conversations/{cid}/messages",
+        json={"message": "我记不清了，好像是 C2"},
+    ).json()
+    assert body["state"] == "ASK"
+    assert "确认实际使用的接口" in body["message"] or "实际使用的接口" in body["message"]
+
+
+def test_conversation_feedback_closes_attempts_without_duplicates(tmp_path) -> None:
+    """完整闭环：明确更正局部撤回，新步骤随反馈更新，最终只保留真实历史。"""
+    client = make_client(tmp_path)
+    cid = client.post("/v1/conversations", json={"message": "A1289 接 C1 充不进去"}).json()[
+        "conversation_id"
+    ]
+    client.post(f"/v1/conversations/{cid}/messages", json={"message": "没有"})
+    first_guide = client.post(
+        f"/v1/conversations/{cid}/messages", json={"message": "屏幕一直 0W"}
+    ).json()
+    old_attempt_id = first_guide["next_attempt_id"]
+
+    corrected = client.post(
+        f"/v1/conversations/{cid}/messages",
+        json={"message": "我之前说错了，我接的是 C2，不是 C1"},
+    ).json()
+    new_attempt_id = corrected["next_attempt_id"]
+    assert corrected["state"] == "GUIDE"
+    assert new_attempt_id != old_attempt_id
+
+    recovered = client.post(
+        f"/v1/conversations/{cid}/messages",
+        json={"message": "改接 C1 后有输入了"},
+    ).json()
+    assert recovered["state"] == "GUIDE"
+    assert recovered["confirmation_required"] is True
+
+    resolved = client.post(
+        f"/v1/conversations/{cid}/messages",
+        json={"message": "持续有输入，没有中断"},
+    ).json()
+    assert resolved["state"] == "RESOLVE"
+
+    attempts = client.get(f"/v1/conversations/{cid}/attempts").json()
+    assert len(attempts) == 2
+    by_id = {attempt["attempt_id"]: attempt for attempt in attempts}
+    assert by_id[old_attempt_id]["status"] == "withdrawn"
+    assert by_id[new_attempt_id]["execution_status"] == "executed"
+    assert by_id[new_attempt_id]["outcome"] == "resolved"
+    assert "稳定性确认" in by_id[new_attempt_id]["observation"]
+
+    view = client.get(f"/v1/agent/conversations/{cid}").json()
+    package = view["handoff_package"]
+    assert len(package["withdrawn_attempts"]) == 1
+    assert len(package["executed_attempts"]) == 1
+    assert package["tested_items"] == ["改接 C1 测试"]
+    assert package["unresolved_items"] == []
+
+
+def test_conversation_feedback_records_unavailable_and_unknown(tmp_path) -> None:
+    client = make_client(tmp_path)
+    cid = client.post("/v1/conversations", json={"message": "A1289 接 C1 充不进去"}).json()[
+        "conversation_id"
+    ]
+    client.post(f"/v1/conversations/{cid}/messages", json={"message": "没有"})
+    guide = client.post(f"/v1/conversations/{cid}/messages", json={"message": "屏幕一直 0W"}).json()
+    attempt_id = guide["next_attempt_id"]
+
+    client.post(
+        f"/v1/conversations/{cid}/messages",
+        json={"message": "没有其他插座，没法执行"},
+    )
+    attempts = client.get(f"/v1/conversations/{cid}/attempts").json()
+    attempt = next(item for item in attempts if item["attempt_id"] == attempt_id)
+    assert attempt["execution_status"] == "skipped_unavailable"
+    assert attempt["outcome"] == "unknown"
+
+    # 新会话验证“已执行但暂无法判断”：保留当前阶段并补问观察，不误跳步。
+    cid2 = client.post("/v1/conversations", json={"message": "A1289 接 C1 充不进去"}).json()[
+        "conversation_id"
+    ]
+    client.post(f"/v1/conversations/{cid2}/messages", json={"message": "没有"})
+    guide2 = client.post(
+        f"/v1/conversations/{cid2}/messages", json={"message": "屏幕一直 0W"}
+    ).json()
+    unknown = client.post(
+        f"/v1/conversations/{cid2}/messages",
+        json={"message": "已经换了，但暂时无法判断"},
+    ).json()
+    assert unknown["state"] == "ASK"
+    attempts2 = client.get(f"/v1/conversations/{cid2}/attempts").json()
+    attempt2 = next(item for item in attempts2 if item["attempt_id"] == guide2["next_attempt_id"])
+    assert attempt2["execution_status"] == "executed"
+    assert attempt2["outcome"] == "unknown"
+
+
+def test_risk_interrupt_does_not_mark_attempt_as_completed(tmp_path) -> None:
+    client = make_client(tmp_path)
+    cid = client.post("/v1/conversations", json={"message": "A1289 接 C1 充不进去"}).json()[
+        "conversation_id"
+    ]
+    client.post(f"/v1/conversations/{cid}/messages", json={"message": "没有"})
+    guide = client.post(f"/v1/conversations/{cid}/messages", json={"message": "屏幕一直 0W"}).json()
+    blocked = client.post(
+        f"/v1/conversations/{cid}/messages",
+        json={"message": "换插座后有输入了，但是设备开始冒烟"},
+    ).json()
+    assert blocked["state"] == "BLOCK"
+    attempts = client.get(f"/v1/conversations/{cid}/attempts").json()
+    attempt = next(item for item in attempts if item["attempt_id"] == guide["next_attempt_id"])
+    assert attempt["execution_status"] == "proposed"
+    assert attempt["outcome"] is None
 
 
 def test_ma02_provider_timeout_during_risk_still_blocks(tmp_path) -> None:

@@ -184,7 +184,7 @@ class AttemptRecord(BaseModel):
     exit_condition: str
     execution_status: Literal["proposed", "executed", "skipped", "skipped_unavailable"] = "proposed"
     observation: Optional[str] = None
-    outcome: Optional[Literal["improved", "unchanged", "worse", "unknown"]] = None
+    outcome: Optional[Literal["improved", "unchanged", "worse", "unknown", "resolved"]] = None
     depends_on: dict[str, dict[str, Any]] = Field(default_factory=dict)
     status: Literal["active", "withdrawn"] = "active"
     withdrawn_reason: Optional[str] = None

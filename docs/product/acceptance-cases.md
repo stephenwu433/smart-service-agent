@@ -105,10 +105,9 @@
 ### CR01 C1 后更正为 C2
 
 - **用户情况**：我之前说错了，我接的是 C2，不是 C1。
-- **预期**：确认更正，局部撤回依赖 C1 的 Attempt，继续给出改接 C1 的指引。
-- **实现**：`_detect_fact_correction` 创建 `pending_confirmation.type=fact_correction_pending`，
-  返回 `state=ASK` 询问确认；用户回复肯定词后才调 `_apply_correction`。
-  按交接文档第 5 页（二次确认）实现。
+- **预期**：明确更正直接生效，局部撤回依赖 C1 的 Attempt，继续给出改接 C1 的指引。
+- **实现**：`_detect_fact_correction` 识别明确新值后直接调用 `_apply_correction`；只有“可能是 C2”
+  等模糊说法才返回 `state=ASK`。
 
 ### FB01 没有替代配件，无法执行
 
