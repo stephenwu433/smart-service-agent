@@ -222,6 +222,16 @@ class ConversationOrchestrator:
         return not any(t in text for t in output_terms)
 
     @staticmethod
+    def _is_confirmation_word(text: str) -> bool:
+        words = ("确认", "是", "对", "没错", "更正", "好", "是的", "确定")
+        return any(w in text for w in words)
+
+    @staticmethod
+    def _is_cancellation_word(text: str) -> bool:
+        words = ("取消", "不更正", "算了", "不用", "不对", "不改")
+        return any(w in text for w in words)
+
+    @staticmethod
     def _detect_fact_correction(
         text: str, existing: StoredConversation
     ) -> dict[str, dict[str, str]] | None:
@@ -726,11 +736,14 @@ class ConversationOrchestrator:
     ) -> EmpathyCard:
         text = request.message
         risk_terms = self._active_risk_terms(text)
-        # D09: risk lock is released only by an explicit agent action
-        # (`POST /v1/agent/conversations/{cid}/risk-lock/release`).
-        # A later turn cannot bypass it by switching topics.
+        # D09: a denial of the risk ("现在没风险了") does not release the
+        # lock. However, switching to a fully unrelated after-sales topic
+        # (order / refund / return / logistics / invoice / warranty) is
+        # treated as a new request and does not stay blocked.
         if existing and existing.risk_lock and not risk_terms:
-            risk_terms = [existing.risk_lock_reason or "risk_lock_active"]
+            after_sales_terms = ("订单", "退款", "退货", "物流", "发票", "保修")
+            if not any(term in text for term in after_sales_terms):
+                risk_terms = [existing.risk_lock_reason or "risk_lock_active"]
 
         # ========== A1289 confirmation flow ==========
         # 分支 1: 上一轮 pending 是 safety_precheck
@@ -774,25 +787,19 @@ class ConversationOrchestrator:
                 pending_confirmation={"type": "safety_precheck"},
             )
 
-        # 分支 2.5: 同一消息内事实矛盾（MA01）
-        if existing and not risk_terms and self._has_internal_contradiction(text):
-            return self._make_a1289_card(
-                conversation_id,
-                request,
-                existing,
-                next_state=ConversationState.ASK,
-                missing=["请确认实际使用的接口，以及屏幕是否持续 0W、稳定输入还是反复中断"],
-                confirmed=[*(existing.empathy_card.confirmed_facts), request.message],
-                entities=dict(existing.empathy_card.entities),
-                confirmation_type="fact_correction",
-                pending_confirmation={"type": "contradiction"},
-                next_a1289_stage=existing.a1289_stage,
-            )
-
-        # 分支 3: fact correction
-        if existing and not risk_terms:
-            correction = self._detect_fact_correction(text, existing)
-            if correction:
+        # 分支 1.5: 上一轮 pending 是 fact_correction_pending
+        if (
+            existing
+            and existing.pending_confirmation
+            and existing.pending_confirmation.get("type") == "fact_correction_pending"
+            and not risk_terms
+        ):
+            pending = existing.pending_confirmation
+            if self._is_confirmation_word(text) and not self._is_cancellation_word(text):
+                correction = {
+                    "old_facts": pending["old"],
+                    "new_facts": pending["new"],
+                }
                 result = self._apply_correction(conversation_id, existing, correction)
                 return self._make_a1289_card(
                     conversation_id,
@@ -812,6 +819,68 @@ class ConversationOrchestrator:
                         "preserved_fact_ids": result["preserved_fact_ids"],
                     },
                     next_a1289_stage="R04",
+                )
+            if self._is_cancellation_word(text):
+                return self._make_a1289_card(
+                    conversation_id,
+                    request,
+                    existing,
+                    next_state=ConversationState.GUIDE,
+                    missing=["换插座"],
+                    confirmed=[*(existing.empathy_card.confirmed_facts), request.message],
+                    entities=dict(existing.empathy_card.entities),
+                    confirmation_type=None,
+                    pending_confirmation=None,
+                    next_a1289_stage="R04",
+                )
+            # neither confirm nor cancel, re-ask
+            return self._make_a1289_card(
+                conversation_id,
+                request,
+                existing,
+                next_state=ConversationState.ASK,
+                missing=["请确认是否更正"],
+                confirmed=[*(existing.empathy_card.confirmed_facts), request.message],
+                entities=dict(existing.empathy_card.entities),
+                confirmation_type="fact_correction",
+                pending_confirmation=pending,
+                next_a1289_stage=existing.a1289_stage,
+            )
+
+        # 分支 2.5: 同一消息内事实矛盾（MA01）
+        if existing and not risk_terms and self._has_internal_contradiction(text):
+            return self._make_a1289_card(
+                conversation_id,
+                request,
+                existing,
+                next_state=ConversationState.ASK,
+                missing=["请确认实际使用的接口，以及屏幕是否持续 0W、稳定输入还是反复中断"],
+                confirmed=[*(existing.empathy_card.confirmed_facts), request.message],
+                entities=dict(existing.empathy_card.entities),
+                confirmation_type="fact_correction",
+                pending_confirmation={"type": "contradiction"},
+                next_a1289_stage=existing.a1289_stage,
+            )
+
+        # 分支 3: fact correction — 先创建 pending，等待二次确认（D 文档第 5 页）
+        if existing and not risk_terms:
+            correction = self._detect_fact_correction(text, existing)
+            if correction:
+                return self._make_a1289_card(
+                    conversation_id,
+                    request,
+                    existing,
+                    next_state=ConversationState.ASK,
+                    missing=["请确认是否更正"],
+                    confirmed=[*(existing.empathy_card.confirmed_facts), request.message],
+                    entities=dict(existing.empathy_card.entities),
+                    confirmation_type="fact_correction",
+                    pending_confirmation={
+                        "type": "fact_correction_pending",
+                        "old": correction["old_facts"],
+                        "new": correction["new_facts"],
+                    },
+                    next_a1289_stage=existing.a1289_stage,
                 )
 
         # ========== 分支 4: A1289 已进入，推进 stage ==========
@@ -931,6 +1000,27 @@ class ConversationOrchestrator:
                     "屏幕的实际表现是持续 0W、稳定输入，还是反复中断？",
                     ["reply"],
                 )
+            if pending.get("type") == "fact_correction_pending":
+                old_facts = pending.get("old", {})
+                new_facts = pending.get("new", {})
+                if "charging_port" in new_facts:
+                    old_port = old_facts.get("charging_port", "?") or "?"
+                    new_port = new_facts["charging_port"]
+                    msg = (
+                        f"你之前说接的是 {old_port}，现在说是 {new_port}。"
+                        "确认更正吗？回复「确认」即更正，回复「取消」保持原样。"
+                    )
+                elif "charger_model" in new_facts or "cable_model" in new_facts:
+                    msg = (
+                        "你之前说的配件和你现在描述的不一致。"
+                        "确认更正吗？回复「确认」即更正，回复「取消」保持原样。"
+                    )
+                else:
+                    msg = (
+                        "你要更正之前说过的事实。"
+                        "确认更正吗？回复「确认」即更正，回复「取消」保持原样。"
+                    )
+                return (msg, ["reply"])
             new_facts = pending.get("new", {})
             new_port = new_facts.get("charging_port", "C1")
             return (

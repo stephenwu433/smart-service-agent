@@ -179,10 +179,20 @@ def test_a1289_fact_correction_revises_and_withdraws(tmp_path) -> None:
     assert attempt["status"] == "active"
     assert "charging_port" in attempt["depends_on"]
 
-    # 用户更正 C1 → C2
-    corrected = client.post(
+    # 用户更正 C1 → C2，系统先返回 pending
+    pending = client.post(
         f"/v1/conversations/{cid}/messages",
         json={"message": "我之前说错了，我接的是 C2，不是 C1"},
+    ).json()
+    assert pending["state"] == "ASK"
+    assert "确认" in pending["message"]
+    assert pending["old_fact"] == {"charging_port": "C1"}
+    assert pending["new_fact"] == {"charging_port": "C2"}
+
+    # 用户二次确认
+    corrected = client.post(
+        f"/v1/conversations/{cid}/messages",
+        json={"message": "确认"},
     ).json()
     assert corrected["state"] == "GUIDE"
     assert "已更正为 C2" in corrected["message"]
@@ -207,6 +217,10 @@ def test_a1289_fact_correction_writes_audit(tmp_path) -> None:
     client.post(
         f"/v1/conversations/{cid}/messages",
         json={"message": "我之前说错了，我接的是 C2，不是 C1"},
+    )
+    client.post(
+        f"/v1/conversations/{cid}/messages",
+        json={"message": "确认"},
     )
 
     view = client.get(f"/v1/agent/conversations/{cid}").json()
@@ -415,19 +429,21 @@ def test_ma01_internal_contradiction_asks_clarification(tmp_path) -> None:
     assert "已更正为" not in body["message"]
 
 
-def test_ma01_cross_turn_correction_still_accepted(tmp_path) -> None:
-    """跨轮明确更正仍走直接接受，不误判为 MA01 矛盾。"""
+def test_ma01_cross_turn_correction_goes_pending(tmp_path) -> None:
+    """跨轮明确更正进入 pending，不误判为 MA01 矛盾。"""
     client = make_client(tmp_path)
     cid = client.post("/v1/conversations", json={"message": "A1289 接 C1 充不进去"}).json()[
         "conversation_id"
     ]
     client.post(f"/v1/conversations/{cid}/messages", json={"message": "没有"})
-    body = client.post(
+    # 跨轮明确更正 -> pending，不触发矛盾追问
+    pending = client.post(
         f"/v1/conversations/{cid}/messages",
         json={"message": "我之前说错了，我接的是 C2，不是 C1"},
     ).json()
-    assert body["state"] == "GUIDE"
-    assert "已更正为 C2" in body["message"]
+    assert pending["state"] == "ASK"
+    assert "确认" in pending["message"]
+    assert "不一致" not in pending["message"]
 
 
 def test_rv02_liquid_plus_heat_blocks_both_terms(tmp_path) -> None:
@@ -454,12 +470,19 @@ def test_ms01_c2_to_c1_recovery_full_flow(tmp_path) -> None:
     # 用户先否认风险
     client.post(f"/v1/conversations/{cid}/messages", json={"message": "没有"})
 
-    # 用户更正接口，触发 fact_correction
-    corrected = client.post(
+    # 用户更正接口，先进入 pending
+    pending = client.post(
         f"/v1/conversations/{cid}/messages",
         json={"message": "我之前说错了，我接的是 C2，不是 C1"},
     ).json()
-    # 更正后系统给出改接 C1 指引
+    assert pending["state"] == "ASK"
+    assert "确认" in pending["message"]
+
+    # 用户二次确认后系统给出改接 C1 指引
+    corrected = client.post(
+        f"/v1/conversations/{cid}/messages",
+        json={"message": "确认"},
+    ).json()
     assert corrected["state"] == "GUIDE"
     assert "C1" in corrected["message"]
 
@@ -562,13 +585,21 @@ def test_story2_cable_to_charger_correction(tmp_path) -> None:
     assert attempt["status"] == "active"
     assert "cable_model" in attempt["depends_on"]
 
-    # 用户更正：之前说换过线，其实是换过充电头
-    corrected = client.post(
+    # 用户更正：之前说换过线，其实是换过充电头。先 pending。
+    pending = client.post(
         f"/v1/conversations/{cid}/messages",
         json={"message": "我之前说换过线，其实是换过充电头"},
     ).json()
-    assert corrected["old_fact"] == {"cable_model": "换过"}
-    assert corrected["new_fact"] == {"charger_model": "换过"}
+    assert pending["state"] == "ASK"
+    assert "确认" in pending["message"]
+    assert pending["old_fact"] == {"cable_model": "换过"}
+    assert pending["new_fact"] == {"charger_model": "换过"}
+
+    # 用户二次确认
+    corrected = client.post(
+        f"/v1/conversations/{cid}/messages",
+        json={"message": "确认"},
+    ).json()
     assert attempt["attempt_id"] in corrected["withdrawn_attempt_ids"]
     assert corrected["new_revision"] is not None
 
@@ -642,14 +673,14 @@ def test_d03_uncertain_compatibility_goes_handoff(tmp_path) -> None:
 
 
 def test_d09_manual_risk_lock_release(tmp_path) -> None:
-    """D09：锁定后即使换话题仍 BLOCK；只有人工解除后普通流程恢复。"""
+    """D09：用户否认风险不解锁；只有人工解除后普通流程恢复。"""
     client = make_client(tmp_path)
     cid = client.post("/v1/conversations", json={"message": "充电器冒烟"}).json()["conversation_id"]
     r1 = client.post(
         f"/v1/conversations/{cid}/messages",
-        json={"message": "我现在想问订单退款"},
+        json={"message": "现在没有风险了，可以继续吗"},
     ).json()
-    # D09: no automatic bypass, stays BLOCK
+    # D09: a denial does not release the lock
     assert r1["state"] == "BLOCK"
 
     # explicit agent release
@@ -660,12 +691,12 @@ def test_d09_manual_risk_lock_release(tmp_path) -> None:
     assert release.status_code == 200
     assert release.json()["risk_lock"] is False
 
-    # after release, the same after-sales message follows the normal flow
+    # after release, the same denial is no longer blocked
     r2 = client.post(
         f"/v1/conversations/{cid}/messages",
-        json={"message": "我现在想问订单退款"},
+        json={"message": "现在没有风险了，可以继续吗"},
     ).json()
-    assert r2["state"] == "HANDOFF"
+    assert r2["state"] != "BLOCK"
 
 
 def test_d05_attachment_with_sufficient_text_proceeds(tmp_path) -> None:

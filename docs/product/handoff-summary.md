@@ -91,8 +91,10 @@ Attempt、Ticket 和测试骨架，只补本次 A1289 场景真正缺少的状�
 | 6 局部撤回 | 依赖旧 C1 的 attempt A 失效 | `status withdrawn reason fact changed` |
 | 7 继续 | 型号和安全信息仍保留，新增改接 C1 的步骤 | 新 attempt 使用 revision 2 |
 
-> 实现说明：本项目按 2 号后续样例把"步骤 3–5"简化为**直接接受更正**，不再做二次确认；
-> 但依然记录 `old_facts`、`new_facts`、`withdrawn_attempt_ids`，并写 `case_revised` 审计。
+> 实现说明：本项目按本表第 3–5 步实现二次确认。用户跨轮更正时先创建
+> `pending_confirmation.type=fact_correction_pending` 并返回 `state=ASK`；用户回复肯定词后
+> 才应用更正、撤回依赖旧值的 Attempt、写 `case_revised` 审计。取消词则丢弃 pending，
+> 保留旧事实。
 
 ## 五 争议点与本版处理
 

@@ -87,13 +87,18 @@ A1289 是 P0 里唯一进入主排障流程的型号。触发条件：当前 `me
 响应为更新后的 `StoredConversation`，`risk_lock=false`。D09：普通流程不因用户下一轮否认自动
 恢复；只有人工明确解除后才恢复。
 
-**事实更正**（按 2 号样例，直接接受，不做二次确认）：
+**事实更正**（按交接文档第 5 页，二次确认）：
 
-- 用户在同一轮内表达"说错 / 实际是 / 其实"等触发词，且出现新事实值 → 系统直接更新 Case
-  revision，撤回依赖旧值的 Attempt，写出 `case_revised` 审计，并给出下一步。
-- 同一消息内出现 ≥2 个端口 + 犹豫词（`不对`、`可能`、`也许`、`一会儿`、`又`、`不确定`）→ 返回
-  `confirmation_type=fact_correction` 且 `pending_confirmation.type=contradiction`，进入追问
-  `ASK`，不直接更正。
+- 跨轮明确更正：用户在同一轮内表达"说错 / 实际是 / 其实"等触发词，且出现新事实值 →
+  系统先返回 `confirmation_type=fact_correction` 且
+  `pending_confirmation.type=fact_correction_pending`，`state=ASK`，询问"确认更正吗？"。
+  用户回复肯定词（`确认` / `是` / `对` / `没错` / `更正` / `好` / `是的` / `确定`）后才更新
+  Case revision，撤回依赖旧值的 Attempt，写出 `case_revised` 审计，并给出下一步。
+  用户回复取消词（`取消` / `不更正` / `算了` / `不用` / `不对` / `不改`）则丢弃 pending，
+  保留旧事实。
+- 同轮矛盾：同一消息内出现 ≥2 个端口 + 犹豫词（`不对`、`可能`、`也许`、`一会儿`、`又`、
+  `不确定`）→ 返回 `confirmation_type=fact_correction` 且
+  `pending_confirmation.type=contradiction`，进入追问 `ASK`，不直接更正。
 
 **附件可选（D05）**：若 `message` 含充不进/无法充电/A1289/737 等关键词，即使带附件也走正常
 流程；否则保持原有"无法读取附件 + 转人工"分支。

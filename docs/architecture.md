@@ -102,7 +102,8 @@ A1289 的 P0 行为在原有确定性编排器上叠加，不改变顶层 `Conve
   `resolved_check`，不新增顶层状态。
 - `safety_precheck`：A1289 首次进入时先问"是否有鼓包、异味、冒烟、进液、异常发热"，用户回
   否定词才推进到 R03。
-- `fact_correction`：跨轮明确更正直接接受；同轮矛盾（MA01）改为追问。
+- `fact_correction`：跨轮明确更正进入 `pending_confirmation.type=fact_correction_pending`，
+  用户二次确认后才应用（`_apply_correction`）；同轮矛盾（MA01，`type=contradiction`）改为追问。
 - `resolved_check`：用户报告恢复后继续问"是否稳定"，用户确认稳定才结案。
 
 **A1289 阶段机**

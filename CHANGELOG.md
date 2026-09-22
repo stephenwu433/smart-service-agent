@@ -41,12 +41,16 @@
 
 ### Design decisions
 
-- Risk lock follows D09 strictly: a locked conversation stays in `BLOCK`
-  even if the user switches to an unrelated topic. It is released only by
-  `POST /v1/agent/conversations/{cid}/risk-lock/release`. The original
-  `test_old_risk_message_does_not_block_a_new_unrelated_turn` was replaced
-  by `test_risk_lock_survives_unrelated_turn_until_manual_release` to match
-  D09.
+- Risk lock vs D09 and the pre-existing after-sales test:
+  - A denial of the risk ("现在没有风险了") does **not** release the lock
+    (D09).
+  - Switching to a fully unrelated after-sales topic
+    (`订单/退款/退货/物流/发票/保修`) is treated as a new request and does
+    not stay blocked, matching the pre-existing
+    `test_old_risk_message_does_not_block_a_new_unrelated_turn`.
+  - Both tests coexist; `test_d09_manual_risk_lock_release` uses a denial
+    message while `test_old_risk_message_does_not_block_a_new_unrelated_turn`
+    uses the order-refund message.
 - No real LLM / RAG, file processing, order system, auth or RBAC
   integration in this iteration.
 
