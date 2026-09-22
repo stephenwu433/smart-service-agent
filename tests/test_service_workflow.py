@@ -156,7 +156,12 @@ def test_database_failure_returns_safe_actionable_error(tmp_path) -> None:
     assert "secret-host" not in response.text
 
 
-def test_old_risk_message_does_not_block_a_new_unrelated_turn(tmp_path) -> None:
+def test_risk_lock_survives_unrelated_turn_until_manual_release(tmp_path) -> None:
+    """D09: a locked conversation stays in BLOCK even if the user changes topic.
+
+    Only an explicit agent release (risk-lock/release endpoint) restores the
+    normal flow.
+    """
     client = make_client(tmp_path)
     first = client.post("/v1/conversations", json={"message": "充电器冒烟"}).json()
 
@@ -165,10 +170,21 @@ def test_old_risk_message_does_not_block_a_new_unrelated_turn(tmp_path) -> None:
         json={"message": "我现在想问订单退款"},
     ).json()
 
-    assert second["state"] == "HANDOFF"
-    card = client.get(f"/v1/agent/conversations/{first['conversation_id']}").json()["empathy_card"]
-    assert card["intent"] == "after_sales"
-    assert card["risk_level"] == "low"
+    assert second["state"] == "BLOCK"
+
+    # After an explicit agent release, the normal flow resumes.
+    release = client.post(
+        f"/v1/agent/conversations/{first['conversation_id']}/risk-lock/release",
+        json={"reason": "已完成风险处理", "operator": "agent-001"},
+    )
+    assert release.status_code == 200
+    assert release.json()["risk_lock"] is False
+
+    third = client.post(
+        f"/v1/conversations/{first['conversation_id']}/messages",
+        json={"message": "我现在想问订单退款"},
+    ).json()
+    assert third["state"] == "HANDOFF"
 
 
 def test_negated_hypothetical_and_third_party_risks_do_not_false_block(tmp_path) -> None:

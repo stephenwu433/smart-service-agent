@@ -642,21 +642,30 @@ def test_d03_uncertain_compatibility_goes_handoff(tmp_path) -> None:
 
 
 def test_d09_manual_risk_lock_release(tmp_path) -> None:
-    """D09：人工解除风险锁后，普通流程恢复。"""
+    """D09：锁定后即使换话题仍 BLOCK；只有人工解除后普通流程恢复。"""
     client = make_client(tmp_path)
     cid = client.post("/v1/conversations", json={"message": "充电器冒烟"}).json()["conversation_id"]
     r1 = client.post(
         f"/v1/conversations/{cid}/messages",
         json={"message": "我现在想问订单退款"},
     ).json()
-    assert r1["state"] == "HANDOFF"
+    # D09: no automatic bypass, stays BLOCK
+    assert r1["state"] == "BLOCK"
 
+    # explicit agent release
     release = client.post(
         f"/v1/agent/conversations/{cid}/risk-lock/release",
         json={"reason": "已完成风险处理", "operator": "agent-001"},
     )
     assert release.status_code == 200
     assert release.json()["risk_lock"] is False
+
+    # after release, the same after-sales message follows the normal flow
+    r2 = client.post(
+        f"/v1/conversations/{cid}/messages",
+        json={"message": "我现在想问订单退款"},
+    ).json()
+    assert r2["state"] == "HANDOFF"
 
 
 def test_d05_attachment_with_sufficient_text_proceeds(tmp_path) -> None:

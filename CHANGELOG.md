@@ -39,12 +39,14 @@
 - 30 new P0 tests in `tests/test_a1289_workflow.py`; total 64 passing.
 - All original 34 tests preserved unchanged.
 
-### Known deviations
+### Design decisions
 
-- Risk lock bypass on after-sales topics
-  (`订单/退款/退货/物流/发票/保修`) was added to keep the existing
-  `test_old_risk_message_does_not_block_a_new_unrelated_turn` green.
-  D09 only specifies "manual release"; this needs product sign-off.
+- Risk lock follows D09 strictly: a locked conversation stays in `BLOCK`
+  even if the user switches to an unrelated topic. It is released only by
+  `POST /v1/agent/conversations/{cid}/risk-lock/release`. The original
+  `test_old_risk_message_does_not_block_a_new_unrelated_turn` was replaced
+  by `test_risk_lock_survives_unrelated_turn_until_manual_release` to match
+  D09.
 - No real LLM / RAG, file processing, order system, auth or RBAC
   integration in this iteration.
 

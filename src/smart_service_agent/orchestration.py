@@ -716,10 +716,11 @@ class ConversationOrchestrator:
     ) -> EmpathyCard:
         text = request.message
         risk_terms = self._active_risk_terms(text)
+        # D09: risk lock is released only by an explicit agent action
+        # (`POST /v1/agent/conversations/{cid}/risk-lock/release`).
+        # A later turn cannot bypass it by switching topics.
         if existing and existing.risk_lock and not risk_terms:
-            after_sales_terms = ("订单", "退款", "退货", "物流", "发票", "保修")
-            if not any(term in text for term in after_sales_terms):
-                risk_terms = [existing.risk_lock_reason or "risk_lock_active"]
+            risk_terms = [existing.risk_lock_reason or "risk_lock_active"]
 
         # ========== A1289 confirmation flow ==========
         # 分支 1: 上一轮 pending 是 safety_precheck
