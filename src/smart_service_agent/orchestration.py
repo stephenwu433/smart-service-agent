@@ -393,6 +393,14 @@ class ConversationOrchestrator:
         )
         return conversation
 
+    @staticmethod
+    def _user_has_accessory(text: str) -> bool:
+        negatives = ("找不到", "没有", "都没有", "没法", "不具备", "不能")
+        if any(n in text for n in negatives):
+            return False
+        positives = ("找到", "有", "可以", "能用", "具备")
+        return any(p in text for p in positives)
+
     def _build_auto_attempt(self, conversation_id, card, existing):
         stage = card.next_a1289_stage
         specs = {
@@ -545,11 +553,12 @@ class ConversationOrchestrator:
                     conversation_id,
                     request,
                     existing,
-                    next_state=ConversationState.HANDOFF,
-                    missing=["配件交叉测试和完整记录"],
+                    next_state=ConversationState.ASK,
+                    missing=["连接照片、C1 接口位置、屏幕或灯显状态"],
                     confirmed=confirmed,
                     entities=entities,
-                    next_a1289_stage="R07",
+                    pending_confirmation={"type": "evidence"},
+                    next_a1289_stage="R08_EVIDENCE",
                 )
             target = "R05" if acc in ("both", "charger_only") else "R06"
             return self._make_a1289_card(
@@ -592,11 +601,12 @@ class ConversationOrchestrator:
                 conversation_id,
                 request,
                 existing,
-                next_state=ConversationState.HANDOFF,
-                missing=["线材交叉测试"],
+                next_state=ConversationState.ASK,
+                missing=["可正常使用的线材"],
                 confirmed=confirmed,
                 entities=entities,
-                next_a1289_stage="R07",
+                pending_confirmation={"type": "accessories"},
+                next_a1289_stage="R07_REMIND",
             )
         if stage == "R06":
             if self._looks_resolved(text) and self._mentions_cable(text):
@@ -612,6 +622,43 @@ class ConversationOrchestrator:
                     pending_confirmation={"type": "resolved_check"},
                     next_a1289_stage="R06",
                 )
+            return self._make_a1289_card(
+                conversation_id,
+                request,
+                existing,
+                next_state=ConversationState.ASK,
+                missing=["连接照片、C1 接口位置、屏幕或灯显状态"],
+                confirmed=confirmed,
+                entities=entities,
+                pending_confirmation={"type": "evidence"},
+                next_a1289_stage="R08_EVIDENCE",
+            )
+        if stage == "R07_REMIND":
+            if self._user_has_accessory(text):
+                return self._make_a1289_card(
+                    conversation_id,
+                    request,
+                    existing,
+                    next_state=ConversationState.GUIDE,
+                    missing=[],
+                    confirmed=confirmed,
+                    entities=entities,
+                    next_a1289_stage="R06",
+                )
+            return self._make_a1289_card(
+                conversation_id,
+                request,
+                existing,
+                next_state=ConversationState.ASK,
+                missing=["连接照片、C1 接口位置、屏幕或灯显状态"],
+                confirmed=confirmed,
+                entities=entities,
+                pending_confirmation={"type": "evidence"},
+                next_a1289_stage="R08_EVIDENCE",
+            )
+        if stage == "R08_EVIDENCE":
+            entities = dict(entities)
+            entities["a1289_evidence"] = text
             return self._make_a1289_card(
                 conversation_id,
                 request,
@@ -884,6 +931,17 @@ class ConversationOrchestrator:
         if card.confirmation_type == "resolved_check":
             return (
                 "请继续观察一会儿，确认输入功率是否能够保持稳定，没有再次变成 0W 或中断。",
+                ["reply"],
+            )
+        if card.confirmation_type is None and card.next_a1289_stage == "R07_REMIND":
+            return (
+                "你能找到另一根可正常使用的 USB-C to USB-C 线吗？",
+                ["reply"],
+            )
+        if card.confirmation_type is None and card.next_a1289_stage == "R08_EVIDENCE":
+            return (
+                "请提供能反映连接方式和屏幕状态的证据：连接照片或视频、"
+                "C1 接口位置、屏幕或灯显状态。文字描述也可以。",
                 ["reply"],
             )
         if card.confirmation_type is None and card.next_a1289_stage == "X":
@@ -1288,6 +1346,26 @@ class ConversationOrchestrator:
         event = self._event_summary(event_row) if event_row else None
         actions = self.repository.get_service_actions(event.event_id) if event else []
         card = conversation.empathy_card
+        executed_attempts = [
+            a.model_dump(mode="json")
+            for a in conversation.attempts
+            if a.status == "active" and a.execution_status == "executed"
+        ]
+        skipped_attempts = [
+            a.model_dump(mode="json")
+            for a in conversation.attempts
+            if a.status == "active"
+            and a.execution_status in ("skipped", "skipped_unavailable")
+        ]
+        withdrawn_attempts = [
+            a.model_dump(mode="json")
+            for a in conversation.attempts
+            if a.status == "withdrawn"
+        ]
+        observations = [a.observation for a in conversation.attempts if a.observation]
+        untested_items = [
+            m for m in card.missing_information if m
+        ]
         package = HandoffPackage(
             conversation_id=conversation_id,
             original_messages=conversation.messages,
@@ -1308,6 +1386,11 @@ class ConversationOrchestrator:
             rule_version=self.settings.rule_version,
             knowledge_version=self.settings.knowledge_version,
             ticket=conversation.ticket,
+            executed_attempts=executed_attempts,
+            skipped_attempts=skipped_attempts,
+            withdrawn_attempts=withdrawn_attempts,
+            observations=observations,
+            untested_items=untested_items,
         )
         return AgentConversationView(
             handoff_package=package,

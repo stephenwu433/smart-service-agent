@@ -233,6 +233,11 @@ class HandoffPackage(BaseModel):
     rule_version: str
     knowledge_version: str
     ticket: Optional[TicketRecord] = None
+    executed_attempts: list[dict[str, Any]] = Field(default_factory=list)
+    skipped_attempts: list[dict[str, Any]] = Field(default_factory=list)
+    withdrawn_attempts: list[dict[str, Any]] = Field(default_factory=list)
+    observations: list[str] = Field(default_factory=list)
+    untested_items: list[str] = Field(default_factory=list)
 
 
 class AgentConversationView(BaseModel):

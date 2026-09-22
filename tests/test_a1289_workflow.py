@@ -299,14 +299,21 @@ def test_a1289_accessories_cable_only_goes_r06(tmp_path) -> None:
     assert "线" in body["message"]
 
 
-def test_a1289_accessories_none_goes_handoff(tmp_path) -> None:
+def test_a1289_accessories_none_goes_evidence_then_handoff(tmp_path) -> None:
     client = make_client(tmp_path)
     cid = client.post("/v1/conversations", json={"message": "A1289 接 C1 充不进去"}).json()[
         "conversation_id"
     ]
     _to_x(client, cid)
     body = client.post(f"/v1/conversations/{cid}/messages", json={"message": "都没有"}).json()
-    assert body["state"] == "HANDOFF"
+    # R08：先请用户提供证据
+    assert body["state"] == "ASK"
+    assert "屏幕" in body["message"] or "照片" in body["message"] or "证据" in body["message"]
+    final = client.post(
+        f"/v1/conversations/{cid}/messages",
+        json={"message": "屏幕一直 0W，C1 接口没有任何灯显"},
+    ).json()
+    assert final["state"] == "HANDOFF"
 
 
 def test_a1289_r05_charger_recovered_triggers_resolved_check(tmp_path) -> None:
@@ -348,7 +355,7 @@ def test_a1289_r06_cable_recovered_triggers_resolved_check(tmp_path) -> None:
     assert "观察" in body["message"]
 
 
-def test_a1289_r06_failed_goes_handoff(tmp_path) -> None:
+def test_a1289_r06_failed_goes_evidence_then_handoff(tmp_path) -> None:
     client = make_client(tmp_path)
     cid = client.post("/v1/conversations", json={"message": "A1289 接 C1 充不进去"}).json()[
         "conversation_id"
@@ -359,7 +366,13 @@ def test_a1289_r06_failed_goes_handoff(tmp_path) -> None:
     body = client.post(
         f"/v1/conversations/{cid}/messages", json={"message": "换了线还是不行"}
     ).json()
-    assert body["state"] == "HANDOFF"
+    # R08：先请用户提供证据
+    assert body["state"] == "ASK"
+    final = client.post(
+        f"/v1/conversations/{cid}/messages",
+        json={"message": "C1 接口没有灯显，屏幕 0W"},
+    ).json()
+    assert final["state"] == "HANDOFF"
 
 
 def test_nb01_output_direction_does_not_enter_a1289_self_charge(tmp_path) -> None:
@@ -497,7 +510,7 @@ def test_ms02_charger_fails_cable_recovers(tmp_path) -> None:
 
 
 def test_ms03_both_tests_fail_to_handoff(tmp_path) -> None:
-    """MS03: 充电器和线材都测了仍失败，转人工。"""
+    """MS03: 充电器和线材都测了仍失败，经 R08 证据收集后转人工。"""
     client = make_client(tmp_path)
     cid = client.post("/v1/conversations", json={"message": "A1289 接 C1 充不进去"}).json()[
         "conversation_id"
@@ -510,11 +523,17 @@ def test_ms03_both_tests_fail_to_handoff(tmp_path) -> None:
     body = client.post(
         f"/v1/conversations/{cid}/messages", json={"message": "换了线还是不行"}
     ).json()
-    assert body["state"] == "HANDOFF"
-    # 交接包应包含已尝试的记录
+    # R08：先请用户提供证据
+    assert body["state"] == "ASK"
+    final = client.post(
+        f"/v1/conversations/{cid}/messages",
+        json={"message": "C1 接口没有灯显，屏幕 0W，已换过插座和线材"},
+    ).json()
+    assert final["state"] == "HANDOFF"
     view = client.get(f"/v1/agent/conversations/{cid}").json()
     pkg = view["handoff_package"]
-    assert "executed_attempts" in pkg or "missing_information" in pkg
+    assert "executed_attempts" in pkg
+    assert "untested_items" in pkg
 
 
 def test_story2_cable_to_charger_correction(tmp_path) -> None:
@@ -676,3 +695,87 @@ def test_skipped_unavailable_records_reason(tmp_path) -> None:
     data = update.json()
     assert data["execution_status"] == "skipped_unavailable"
     assert data["observation"] == "没有其他插座可换"
+
+
+def test_r07_remind_charger_only_then_user_finds_cable(tmp_path) -> None:
+    """R07：只有充电器时，未恢复后提醒找线材；用户找到则进 R06。"""
+    client = make_client(tmp_path)
+    cid = client.post("/v1/conversations", json={"message": "A1289 接 C1 充不进去"}).json()[
+        "conversation_id"
+    ]
+    _to_x(client, cid)
+    client.post(f"/v1/conversations/{cid}/messages", json={"message": "只有充电器"})
+    body = client.post(
+        f"/v1/conversations/{cid}/messages", json={"message": "换了充电器还是不行"}
+    ).json()
+    assert body["state"] == "ASK"
+    assert "线" in body["message"]
+    # 用户说找到线材 -> 进 R06
+    next_body = client.post(
+        f"/v1/conversations/{cid}/messages", json={"message": "我找到另一根线了"}
+    ).json()
+    assert next_body["state"] == "GUIDE"
+    assert "线" in next_body["message"]
+
+
+def test_r07_remind_user_cannot_find_cable_goes_r08(tmp_path) -> None:
+    """R07：只有充电器时，用户无法找到线材，记录未测试转 R08 证据收集。"""
+    client = make_client(tmp_path)
+    cid = client.post("/v1/conversations", json={"message": "A1289 接 C1 充不进去"}).json()[
+        "conversation_id"
+    ]
+    _to_x(client, cid)
+    client.post(f"/v1/conversations/{cid}/messages", json={"message": "只有充电器"})
+    client.post(f"/v1/conversations/{cid}/messages", json={"message": "换了充电器还是不行"})
+    body = client.post(
+        f"/v1/conversations/{cid}/messages", json={"message": "我找不到其他线材"}
+    ).json()
+    assert body["state"] == "ASK"
+    assert "证据" in body["message"] or "照片" in body["message"] or "屏幕" in body["message"]
+
+
+def test_r08_evidence_collection_then_handoff(tmp_path) -> None:
+    """R08：用户提供证据后转人工，证据进入 HandoffPackage。"""
+    client = make_client(tmp_path)
+    cid = client.post("/v1/conversations", json={"message": "A1289 接 C1 充不进去"}).json()[
+        "conversation_id"
+    ]
+    _to_x(client, cid)
+    client.post(f"/v1/conversations/{cid}/messages", json={"message": "都有"})
+    client.post(f"/v1/conversations/{cid}/messages", json={"message": "换充电器还是不行"})
+    client.post(f"/v1/conversations/{cid}/messages", json={"message": "换了线还是不行"})
+    body = client.post(
+        f"/v1/conversations/{cid}/messages",
+        json={"message": "C1 接口无灯显，屏幕 0W，已换线换充电器"},
+    ).json()
+    assert body["state"] == "HANDOFF"
+
+    view = client.get(f"/v1/agent/conversations/{cid}").json()
+    card = view["empathy_card"]
+    assert card["entities"].get("a1289_evidence")
+
+
+def test_handoff_package_includes_all_5_new_fields(tmp_path) -> None:
+    """HandoffPackage 应包含 executed / skipped / withdrawn / observations / untested_items。"""
+    client = make_client(tmp_path)
+    cid = client.post("/v1/conversations", json={"message": "A1289 接 C1 充不进去"}).json()[
+        "conversation_id"
+    ]
+    _to_x(client, cid)
+    client.post(f"/v1/conversations/{cid}/messages", json={"message": "都有"})
+    client.post(f"/v1/conversations/{cid}/messages", json={"message": "换充电器还是不行"})
+    client.post(f"/v1/conversations/{cid}/messages", json={"message": "换了线还是不行"})
+    client.post(
+        f"/v1/conversations/{cid}/messages", json={"message": "C1 无灯显，屏幕 0W"}
+    )
+
+    view = client.get(f"/v1/agent/conversations/{cid}").json()
+    pkg = view["handoff_package"]
+    for key in (
+        "executed_attempts",
+        "skipped_attempts",
+        "withdrawn_attempts",
+        "observations",
+        "untested_items",
+    ):
+        assert key in pkg, key
