@@ -862,3 +862,76 @@ def test_handoff_package_exposes_attempts_and_risks(tmp_path) -> None:
     assert "risks" in pkg
     assert pkg["risks"]
     assert any("冒烟" in r for r in pkg["risks"])
+
+
+def test_fb02_partial_improvement_does_not_close(tmp_path) -> None:
+    """FB02: 部分改善不误结案、不误跳步。"""
+    client = make_client(tmp_path)
+    cid = client.post("/v1/conversations", json={"message": "A1289 接 C1 充不进去"}).json()[
+        "conversation_id"
+    ]
+    client.post(f"/v1/conversations/{cid}/messages", json={"message": "没有"})
+    client.post(f"/v1/conversations/{cid}/messages", json={"message": "屏幕 0W"})
+    # R04 阶段：用户说“感觉好一点了”，但没说恢复
+    body = client.post(
+        f"/v1/conversations/{cid}/messages",
+        json={"message": "感觉好一点了，但还是不太行"},
+    ).json()
+    # 不结案，不跳到 RESOLVE
+    assert body["state"] != "RESOLVE"
+
+
+def test_fb02_unstable_recovery_does_not_close(tmp_path) -> None:
+    """FB02: 用户报告恢复但不稳定，二次确认阶段要求继续观察。"""
+    client = make_client(tmp_path)
+    cid = client.post("/v1/conversations", json={"message": "A1289 接 C1 充不进去"}).json()[
+        "conversation_id"
+    ]
+    client.post(f"/v1/conversations/{cid}/messages", json={"message": "没有"})
+    client.post(f"/v1/conversations/{cid}/messages", json={"message": "屏幕 0W"})
+    # 报告恢复
+    client.post(
+        f"/v1/conversations/{cid}/messages",
+        json={"message": "换插座后好了"},
+    )
+    # 恢复但不稳定 -> 不结案
+    body = client.post(
+        f"/v1/conversations/{cid}/messages",
+        json={"message": "好像还是不太稳定，一会儿有输入一会儿 0W"},
+    ).json()
+    assert body["state"] != "RESOLVE"
+
+
+def test_handoff_package_distinguishes_tested_and_unresolved(tmp_path) -> None:
+    """Sheet1 R08: HandoffPackage 区分 tested_items 和 unresolved_items。"""
+    client = make_client(tmp_path)
+    body = client.post("/v1/conversations", json={"message": "A1289 接 C1 充不进去"}).json()
+    cid = body["conversation_id"]
+    _to_x(client, cid)
+    client.post(f"/v1/conversations/{cid}/messages", json={"message": "都有"})
+    # R05 阶段创建 attempt 并执行（未恢复）
+    r05 = client.post(
+        f"/v1/conversations/{cid}/messages",
+        json={"message": "换充电器还是不行"},
+    ).json()
+    aid = r05.get("next_attempt_id")
+    if aid:
+        client.patch(
+            f"/v1/conversations/{cid}/attempts/{aid}",
+            json={"execution_status": "executed", "observation": "换了充电器仍然 0W"},
+        )
+    # 继续到 HANDOFF
+    client.post(f"/v1/conversations/{cid}/messages", json={"message": "换了线还是不行"})
+    client.post(
+        f"/v1/conversations/{cid}/messages",
+        json={"message": "C1 无灯显，屏幕 0W"},
+    )
+    view = client.get(f"/v1/agent/conversations/{cid}").json()
+    pkg = view["handoff_package"]
+    assert "tested_items" in pkg
+    assert "unresolved_items" in pkg
+    assert "untested_items" in pkg
+    # 至少有一条已测记录
+    assert pkg["tested_items"]
+    # 已测但未 resolved -> unresolved
+    assert pkg["unresolved_items"]

@@ -388,6 +388,23 @@ class ConversationOrchestrator:
 
     @staticmethod
     def _is_stable_confirmation(text: str) -> bool:
+        # 否定或反复表达不算稳定，避免“不太稳定”“一会儿有输入一会儿 0W”误结案
+        negative_markers = (
+            "不稳定",
+            "不太稳定",
+            "没稳定",
+            "没有稳定",
+            "没持续",
+            "没有持续",
+            "不太持续",
+            "偶尔",
+            "间歇",
+            "一会儿有",
+            "一会儿又",
+            "一会儿 0",
+        )
+        if any(m in text for m in negative_markers):
+            return False
         return any(k in text for k in ("稳定", "持续", "没有中断", "一直", "保持"))
 
     def release_risk_lock(
@@ -1462,6 +1479,18 @@ class ConversationOrchestrator:
         ]
         observations = [a.observation for a in conversation.attempts if a.observation]
         untested_items = [m for m in card.missing_information if m]
+        tested_items = [
+            a.recommendation
+            for a in conversation.attempts
+            if a.status == "active" and a.execution_status == "executed"
+        ]
+        unresolved_items = [
+            a.recommendation
+            for a in conversation.attempts
+            if a.status == "active"
+            and a.execution_status == "executed"
+            and a.outcome != "resolved"
+        ]
         package = HandoffPackage(
             conversation_id=conversation_id,
             original_messages=conversation.messages,
@@ -1487,6 +1516,8 @@ class ConversationOrchestrator:
             withdrawn_attempts=withdrawn_attempts,
             observations=observations,
             untested_items=untested_items,
+            tested_items=tested_items,
+            unresolved_items=unresolved_items,
             attempts=[a.model_dump(mode="json") for a in conversation.attempts],
             risks=list(card.risk_reasons),
         )

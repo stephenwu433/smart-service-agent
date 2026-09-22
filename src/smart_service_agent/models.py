@@ -242,6 +242,8 @@ class HandoffPackage(BaseModel):
     withdrawn_attempts: list[dict[str, Any]] = Field(default_factory=list)
     observations: list[str] = Field(default_factory=list)
     untested_items: list[str] = Field(default_factory=list)
+    tested_items: list[str] = Field(default_factory=list)
+    unresolved_items: list[str] = Field(default_factory=list)
     attempts: list[dict[str, Any]] = Field(default_factory=list)
     risks: list[str] = Field(default_factory=list)
 
