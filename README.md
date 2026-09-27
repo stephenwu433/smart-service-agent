@@ -66,15 +66,6 @@ bash scripts/dev.sh         # 默认加载 config/development.env
 > `127.0.0.1` 只有你自己的电脑能打开。GitHub 仓库首页默认显示 `main`；当前带截图的 README 在
 > `cursor/a1289-ui-five-panels-a6f9` 分支，合并后才会出现在仓库首页。
 
-### 2. 发给别人看（Streamlit）
-
-```bash
-bash scripts/streamlit-demo.sh
-```
-
-本机预览 <http://127.0.0.1:8501>。要给别人链接，用 GitHub 登录
-[Streamlit Community Cloud](https://share.streamlit.io/)，选择本仓库、主文件 `streamlit_app.py` 后 Deploy，
-得到 `https://<app-name>.streamlit.app`。说明见 [Streamlit 公开 Demo](docs/streamlit-demo.md)。
 
 ## 环境要求
 
