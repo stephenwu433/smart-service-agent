@@ -211,6 +211,8 @@ function resetSession() {
   renderSession();
   showPanel("start");
 }
+
+async function sendMessage(text, { switchTo } = {}) {
   const message = text.trim();
   if (!message) return;
   showError("");

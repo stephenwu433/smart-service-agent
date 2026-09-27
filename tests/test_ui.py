@@ -1,3 +1,5 @@
+from pathlib import Path
+
 import pytest
 from fastapi import HTTPException
 from fastapi.testclient import TestClient
@@ -72,6 +74,14 @@ def test_ui_file_helper_rejects_disallowed_names() -> None:
     assert unknown.value.status_code == 404
     allowed = ui_file("index.html")
     assert str(allowed.path).endswith("index.html")
+
+
+def test_ui_javascript_defines_core_handlers() -> None:
+    script = Path("src/smart_service_agent/web/app.js").read_text(encoding="utf-8")
+    assert "async function sendMessage(" in script
+    assert "function resetSession(" in script
+    assert "async function reportAttempt(" in script
+    assert "async function decideHandoff(" in script
 
 
 def test_ui_start_payload_enters_a1289_ask() -> None:
