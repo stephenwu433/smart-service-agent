@@ -8,20 +8,54 @@
 4. 风险停止与模拟转人工
 5. 人工客服工作台
 
-静态文件位于 `src/smart_service_agent/web/`，由 `ui_assets.py` 按白名单提供 `index.html`、
-`styles.css` 和 `app.js`。不引入 React、npm 或其他 frontend framework。
+前端源码在 [`src/smart_service_agent/web/`](../src/smart_service_agent/web/)：
 
-## 访问
+| 文件 | 作用 |
+|---|---|
+| `index.html` | 五屏结构和三条演示故事 |
+| `styles.css` | 桌面五屏 / 窄屏单屏样式 |
+| `app.js` | 调用现有 FastAPI，不在浏览器里实现状态机 |
 
-服务启动后打开：
+由 `ui_assets.py` 按白名单提供上述文件。不引入 React、npm 或其他 frontend framework。
+
+## 如何运行 Demo
+
+默认配置是 [`config/development.env`](../config/development.env)，也是本次截图使用的环境：
+
+- `APP_ENV=development`
+- `APP_HOST=127.0.0.1`、`APP_PORT=8000`
+- `MONGODB_URI=mongodb://127.0.0.1:27017`
+- `MONGODB_DATABASE=smart_service_agent`
+- `RULE_VERSION=risk-rules-v1`
+- `KNOWLEDGE_VERSION=demo-knowledge-v1`
+
+```bash
+bash scripts/bootstrap.sh
+bash scripts/mongo-dev.sh   # 另开一个 terminal，保持运行
+bash scripts/dev.sh         # 不传参数即加载 config/development.env
+```
+
+然后打开：
 
 - 五屏前端：<http://127.0.0.1:8000/ui>
 - 兼容入口：<http://127.0.0.1:8000/workspace/consumer>
   与 <http://127.0.0.1:8000/workspace/agent>
 
-页面顶部固定显示「模拟工单 / 演示环境，尚未连接安克官方客服系统」。
+`scripts/dev.sh config/production.env` 会改监听地址和日志级别，不改变五屏页面或 A1289 规则。
+`pytest` 使用 `MemoryRepository`，不读取 `development.env`，也不需要 MongoDB。
 
+页面顶部固定显示「模拟工单 / 演示环境，尚未连接安克官方客服系统」。
 宽屏下五屏同时可见；窄屏一次只显示一屏，可用顶部导航切换。`/workspace/agent` 会直接打开人工工作台。
+
+![五屏桌面](images/ui-five-panels.webp)
+
+![故事1 GUIDE](images/ui-story1-guide.webp)
+
+![故事1 RESOLVE](images/ui-story1-resolved.webp)
+
+![故事3 人工工作台](images/ui-agent-handoff.webp)
+
+![窄屏开始咨询](images/ui-mobile-start.webp)
 
 ## Input / Output
 

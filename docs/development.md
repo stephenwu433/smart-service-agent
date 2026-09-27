@@ -26,10 +26,11 @@ scripts/mongo-dev.sh
 再启动 API：
 
 ```bash
-scripts/dev.sh
+bash scripts/dev.sh
 ```
 
-默认使用 `config/development.env`。传入 config path 可以切换 environment：
+默认使用 `config/development.env`。浏览器 Demo 打开 <http://127.0.0.1:8000/ui>，
+前端源码在 `src/smart_service_agent/web/`。传入 config path 可以切换 environment：
 
 ```bash
 scripts/dev.sh config/production.env

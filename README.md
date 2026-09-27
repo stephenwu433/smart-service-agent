@@ -9,19 +9,39 @@ fallback，可在没有外部 LLM 的情况下运行完整演示流程。
 
 - Python 3.9+
 
-## 本地开发
+## 本地开发与 Demo
+
+默认使用 [`config/development.env`](config/development.env)：`APP_ENV=development`，
+监听 `127.0.0.1:8000`，连接本地 MongoDB `mongodb://127.0.0.1:27017`，
+库名 `smart_service_agent`。规则与知识版本为 `risk-rules-v1` /
+`demo-knowledge-v1`，不需要 LLM API key。
 
 ```bash
-scripts/bootstrap.sh
-scripts/mongo-dev.sh  # 在独立 terminal 启动 MongoDB
-scripts/dev.sh
+bash scripts/bootstrap.sh
+bash scripts/mongo-dev.sh   # 另开一个 terminal，保持运行
+bash scripts/dev.sh         # 默认加载 config/development.env
 ```
 
-服务启动后可访问：
+浏览器打开 <http://127.0.0.1:8000/ui> 即可点五屏 Demo。同一服务还提供：
 
 - 健康检查：<http://127.0.0.1:8000/health>
 - API 文档：<http://127.0.0.1:8000/docs>
-- 五屏原型前端：<http://127.0.0.1:8000/ui>
+
+前端源码在 [`src/smart_service_agent/web/`](src/smart_service_agent/web/)，只有
+`index.html`、`styles.css`、`app.js`。FastAPI 的 `GET /ui` 直接提供这些静态文件，
+没有独立 npm / React 工程。页面只提交用户原话和客服动作，路径由后端 A1289 规则决定。
+
+宽屏下五屏同时可见；可用顶部「故事1 / 故事2 / 故事3」预填原话。
+
+![五屏 Demo 桌面布局](docs/images/ui-five-panels.webp)
+
+![故事1 进入当前一步](docs/images/ui-story1-guide.webp)
+
+![故事1 结案](docs/images/ui-story1-resolved.webp)
+
+![故事3 模拟转人工工作台](docs/images/ui-agent-handoff.webp)
+
+完整操作说明见 [五屏原型前端](docs/ui.md)。
 
 ## 已实现能力
 
@@ -54,13 +74,15 @@ scripts/check.sh
 ## 项目结构
 
 ```text
-src/smart_service_agent/  # 应用代码
-tests/                    # 自动化测试
-docs/                     # 详细项目文档
-config/                   # environment 配置
-data/                     # 本地数据分层
-sandbox/                  # 本地实验区
-scripts/                  # 开发与验证脚本
+src/smart_service_agent/      # 应用代码
+src/smart_service_agent/web/  # 五屏 Demo 前端（HTML/CSS/JS）
+tests/                        # 自动化测试
+docs/                         # 详细项目文档
+docs/images/                  # README / Demo 截图
+config/                       # environment 配置（含 development.env）
+data/                         # 本地数据分层
+sandbox/                      # 本地实验区
+scripts/                      # 开发与验证脚本
 ```
 
 ## 开发规范

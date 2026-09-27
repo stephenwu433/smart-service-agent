@@ -84,6 +84,24 @@ def test_ui_javascript_defines_core_handlers() -> None:
     assert "async function decideHandoff(" in script
 
 
+def test_readme_documents_demo_run_and_frontend_code() -> None:
+    readme = Path("README.md").read_text(encoding="utf-8")
+    assert "config/development.env" in readme
+    assert "http://127.0.0.1:8000/ui" in readme
+    assert "src/smart_service_agent/web/" in readme
+    assert "index.html" in readme
+    assert "docs/images/ui-five-panels.webp" in readme
+    images = Path("docs/images")
+    for name in (
+        "ui-five-panels.webp",
+        "ui-story1-guide.webp",
+        "ui-story1-resolved.webp",
+        "ui-agent-handoff.webp",
+        "ui-mobile-start.webp",
+    ):
+        assert (images / name).is_file()
+
+
 def test_ui_start_payload_enters_a1289_ask() -> None:
     client = make_client()
     body = client.post(
