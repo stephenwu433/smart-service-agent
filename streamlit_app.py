@@ -81,7 +81,10 @@ with tab_start:
 
 with tab_ask:
     st.subheader("追问与待确认")
-    st.write(f"处理进度：{state_name}" + (" · 需要确认" if last and last.confirmation_required else ""))
+    st.write(
+        f"处理进度：{state_name}"
+        + (" · 需要确认" if last and last.confirmation_required else "")
+    )
     if last and last.confirmation_required:
         st.info(last.message)
     else:

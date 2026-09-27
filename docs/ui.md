@@ -47,15 +47,15 @@ bash scripts/dev.sh         # 不传参数即加载 config/development.env
 页面顶部固定显示「模拟工单 / 演示环境，尚未连接安克官方客服系统」。
 宽屏下五屏同时可见；窄屏一次只显示一屏，可用顶部导航切换。`/workspace/agent` 会直接打开人工工作台。
 
-![五屏桌面](images/ui-five-panels.webp)
+![五屏桌面](images/ui-five-panels.jpg)
 
-![故事1 GUIDE](images/ui-story1-guide.webp)
+![故事1 GUIDE](images/ui-story1-guide.jpg)
 
-![故事1 RESOLVE](images/ui-story1-resolved.webp)
+![故事1 RESOLVE](images/ui-story1-resolved.jpg)
 
-![故事3 人工工作台](images/ui-agent-handoff.webp)
+![故事3 人工工作台](images/ui-agent-handoff.jpg)
 
-![窄屏开始咨询](images/ui-mobile-start.webp)
+![窄屏开始咨询](images/ui-mobile-start.jpg)
 
 ## Input / Output
 

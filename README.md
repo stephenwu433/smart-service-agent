@@ -1,20 +1,52 @@
 # Anker Smart Service Agent
 
-面向充电设备售后的 AI service intelligence backend，聚焦故障定位、单步排障引导、
-风险识别和带上下文的人工升级。
-当前实现采用 FastAPI、MongoDB、可替换的 `IntentProvider`/`KnowledgeProvider` 和确定性安全
-fallback，可在没有外部 LLM 的情况下运行完整演示流程。
+面向 Anker 737（A1289）自身充电「充不进去」的售后 Demo：先确认事实，再一次只走一步，
+遇到鼓包等风险立即停止，不能继续时把进度交给模拟人工。  
+后端是 FastAPI；前端是五屏静态页。不接安克官方工单，也不需要 LLM API key。
 
-## 环境要求
+## 创新点
 
-- Python 3.9+
+- **只做一件事**：报名验证版只处理 A1289 给充电宝自身充电；不办退款，不排「充不了手机」。
+- **五条路径，一次一步**：信息不够就 `ASK`，有依据就 `GUIDE`（每次只给一步），命中鼓包/冒烟/异味/进液/异常发热就 `BLOCK`，无适用步骤则 `HANDOFF`，用户说恢复后还要 `CONFIRM` 才结案。
+- **风险锁**：风险一旦成立，用户下一句「没有风险了」也不会自动恢复测试。
+- **更正会局部回退**：用户把 C1 改成 C2 时，只撤回依赖旧事实的 Attempt，型号和配件记录保留。
+- **建议 ≠ 执行过**：Attempt 把建议、是否执行、观察结果分开存；转人工时把原话、事实更正、尝试结果和未排除项一起交给客服。
+- **Mock 标识固定**：页面顶部写明「模拟工单 / 演示环境，尚未连接安克官方客服系统」。
+- **前端不编状态机**：浏览器只提交原话和观察，路径由后端决定。
 
-## 本地开发与 Demo
+## 界面预览
 
-默认使用 [`config/development.env`](config/development.env)：`APP_ENV=development`，
-监听 `127.0.0.1:8000`，连接本地 MongoDB `mongodb://127.0.0.1:27017`，
-库名 `smart_service_agent`。规则与知识版本为 `risk-rules-v1` /
-`demo-knowledge-v1`，不需要 LLM API key。
+宽屏一次看到五屏：开始咨询、追问确认、当前一步、风险转人工、人工工作台。
+
+<p align="center">
+  <img src="docs/images/ui-five-panels.jpg" alt="五屏 Demo 桌面布局" width="920" />
+</p>
+
+故事1：先说接 C1，再更正为 C2，系统撤回不适用步骤，改接 C1 后确认恢复。
+
+<p align="center">
+  <img src="docs/images/ui-story1-guide.jpg" alt="故事1 当前一步" width="920" />
+</p>
+
+<p align="center">
+  <img src="docs/images/ui-story1-resolved.jpg" alt="故事1 结案为 RESOLVE" width="920" />
+</p>
+
+故事3：途中发现鼓包，停止排障并生成模拟人工事件。
+
+<p align="center">
+  <img src="docs/images/ui-agent-handoff.jpg" alt="故事3 人工工作台接管包" width="920" />
+</p>
+
+<p align="center">
+  <img src="docs/images/ui-mobile-start.jpg" alt="窄屏开始咨询" width="390" />
+</p>
+
+## 如何使用
+
+### 1. 本机五屏前端（开发联调）
+
+默认 [`config/development.env`](config/development.env)：本地 MongoDB，`http://127.0.0.1:8000`。
 
 ```bash
 bash scripts/bootstrap.sh
@@ -22,43 +54,32 @@ bash scripts/mongo-dev.sh   # 另开一个 terminal，保持运行
 bash scripts/dev.sh         # 默认加载 config/development.env
 ```
 
-浏览器打开 <http://127.0.0.1:8000/ui> 即可点五屏 Demo。同一服务还提供：
+然后打开：
 
+- 五屏前端：<http://127.0.0.1:8000/ui>
 - 健康检查：<http://127.0.0.1:8000/health>
 - API 文档：<http://127.0.0.1:8000/docs>
 
-前端源码在 [`src/smart_service_agent/web/`](src/smart_service_agent/web/)，只有
-`index.html`、`styles.css`、`app.js`。FastAPI 的 `GET /ui` 直接提供这些静态文件，
-没有独立 npm / React 工程。页面只提交用户原话和客服动作，路径由后端 A1289 规则决定。
+前端代码在 [`src/smart_service_agent/web/`](src/smart_service_agent/web/)（`index.html` / `styles.css` / `app.js`）。  
+页面顶部点「故事1 / 故事2 / 故事3」可预填原话；路径仍由后端决定。
 
-宽屏下五屏同时可见；可用顶部「故事1 / 故事2 / 故事3」预填原话。
+> `127.0.0.1` 只有你自己的电脑能打开。GitHub 仓库首页默认显示 `main`；当前带截图的 README 在
+> `cursor/a1289-ui-five-panels-a6f9` 分支，合并后才会出现在仓库首页。
 
-![五屏 Demo 桌面布局](docs/images/ui-five-panels.webp)
-
-![故事1 进入当前一步](docs/images/ui-story1-guide.webp)
-
-![故事1 结案](docs/images/ui-story1-resolved.webp)
-
-![故事3 模拟转人工工作台](docs/images/ui-agent-handoff.webp)
-
-完整操作说明见 [五屏原型前端](docs/ui.md)。
-
-## 给别人看的 Streamlit Demo
-
-`http://127.0.0.1:8000/ui` 只在你自己的电脑上有效，别人打不开。公开演示用 Streamlit：
+### 2. 发给别人看（Streamlit）
 
 ```bash
 bash scripts/streamlit-demo.sh
 ```
 
-本机预览 <http://127.0.0.1:8501>。要发给别人，在
-[Streamlit Community Cloud](https://share.streamlit.io/) 用 GitHub 登录，选择本仓库、
-`streamlit_app.py` 后 Deploy，得到 `https://<app-name>.streamlit.app`。
+本机预览 <http://127.0.0.1:8501>。要给别人链接，用 GitHub 登录
+[Streamlit Community Cloud](https://share.streamlit.io/)，选择本仓库、主文件 `streamlit_app.py` 后 Deploy，
+得到 `https://<app-name>.streamlit.app`。说明见 [Streamlit 公开 Demo](docs/streamlit-demo.md)。
 
-Streamlit 入口是仓库根目录 [`streamlit_app.py`](streamlit_app.py)，后端是
-[`src/smart_service_agent/demo_backend.py`](src/smart_service_agent/demo_backend.py)
-（同一套 A1289 编排器 + 内存仓储，不需要 MongoDB）。步骤见
-[Streamlit 公开 Demo](docs/streamlit-demo.md)。
+## 环境要求
+
+- Python 3.9+
+- 本机 FastAPI Demo 需要本地 MongoDB；Streamlit Demo 使用内存仓储，不需要 MongoDB
 
 ## 已实现能力
 
@@ -85,7 +106,7 @@ Streamlit 入口是仓库根目录 [`streamlit_app.py`](streamlit_app.py)，后�
 ## 质量检查
 
 ```bash
-scripts/check.sh
+bash scripts/check.sh
 ```
 
 ## 项目结构
@@ -93,9 +114,10 @@ scripts/check.sh
 ```text
 src/smart_service_agent/      # 应用代码
 src/smart_service_agent/web/  # 五屏 Demo 前端（HTML/CSS/JS）
+streamlit_app.py              # 公开分享用 Streamlit 入口
 tests/                        # 自动化测试
 docs/                         # 详细项目文档
-docs/images/                  # README / Demo 截图
+docs/images/                  # README 截图
 config/                       # environment 配置（含 development.env）
 data/                         # 本地数据分层
 sandbox/                      # 本地实验区

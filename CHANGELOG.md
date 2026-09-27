@@ -6,8 +6,7 @@
 
 - `GET /ui` 五屏可点击前端，覆盖开始咨询、追问确认、当前一步、风险转人工和人工工作台，并固定显示
   Mock 标识；`/workspace/consumer` 与 `/workspace/agent` 指向同一套页面。
-- README 补充 Demo 启动步骤（默认 `config/development.env`）、前端源码路径
-  `src/smart_service_agent/web/` 和五屏截图。
+- README 在标题下直接放创新点、五屏截图和本机 / Streamlit 用法，截图使用 `docs/images/*.jpg`。
 - Streamlit 五屏 Demo（`streamlit_app.py`），用同一套 A1289 编排器和内存仓储，便于部署到
   Streamlit Community Cloud；`127.0.0.1:8000/ui` 仍只用于本机。
 - Cross-turn risk lock on `StoredConversation` (`risk_lock`,

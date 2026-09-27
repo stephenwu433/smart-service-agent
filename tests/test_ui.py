@@ -90,14 +90,16 @@ def test_readme_documents_demo_run_and_frontend_code() -> None:
     assert "http://127.0.0.1:8000/ui" in readme
     assert "src/smart_service_agent/web/" in readme
     assert "index.html" in readme
-    assert "docs/images/ui-five-panels.webp" in readme
+    assert "docs/images/ui-five-panels.jpg" in readme
+    assert "## 创新点" in readme
+    assert "## 如何使用" in readme
     images = Path("docs/images")
     for name in (
-        "ui-five-panels.webp",
-        "ui-story1-guide.webp",
-        "ui-story1-resolved.webp",
-        "ui-agent-handoff.webp",
-        "ui-mobile-start.webp",
+        "ui-five-panels.jpg",
+        "ui-story1-guide.jpg",
+        "ui-story1-resolved.jpg",
+        "ui-agent-handoff.jpg",
+        "ui-mobile-start.jpg",
     ):
         assert (images / name).is_file()
 
