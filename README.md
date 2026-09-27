@@ -21,6 +21,7 @@ scripts/dev.sh
 
 - 健康检查：<http://127.0.0.1:8000/health>
 - API 文档：<http://127.0.0.1:8000/docs>
+- 五屏原型前端：<http://127.0.0.1:8000/ui>
 
 ## 已实现能力
 
@@ -33,7 +34,7 @@ scripts/dev.sh
 - 可注入的 RAG/知识库边界，以及知识可回答性过滤和可追踪 evidence。
 - MongoDB 会话、审计、反馈、幂等人工事件和客服动作持久化。
 - 人工客服视图、事件队列和基础服务洞察 API。
-- Ticket 人工回复、动作完成、用户确认解决和重开事件，以及消费者/客服最小 web workspace。
+- Ticket 人工回复、动作完成、用户确认解决和重开事件，以及按原型五屏组织的可点击 Demo 前端。
 - 可审计 Eval：数据指纹、`GOLD` / `CHALLENGE` / `HOLDOUT` 隔离、风险门禁和 `run_id` 报告。
 
 当前附件只进行 metadata 校验；系统会明确告知无法读取内容并建议转人工。订单系统、真实文件
@@ -41,7 +42,8 @@ scripts/dev.sh
 
 完整 API contract 与演示边界见
 [比赛 MVP API](docs/api.md)，实现结构见
-[比赛 MVP Backend Architecture](docs/architecture.md)。
+[比赛 MVP Backend Architecture](docs/architecture.md)，五屏前端见
+[五屏原型前端](docs/ui.md)。
 
 ## 质量检查
 

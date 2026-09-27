@@ -127,8 +127,10 @@ A1289 是 P0 里唯一进入主排障流程的型号。触发条件：当前 `me
 - `POST /v1/agent/conversations/{conversation_id}/ticket/results`：分别记录人工回复、动作完成、
   用户确认解决或重开；这些结果不会相互冒充。
 
-`GET /workspace/consumer` 和 `GET /workspace/agent` 提供无额外 frontend dependency 的最小可运行
-工作区，用于联调消费者输入和人工队列。它们不包含 production 登录能力。
+`GET /ui` 提供按原型五屏组织的可点击前端，静态文件位于 `src/smart_service_agent/web/`。
+`GET /workspace/consumer` 和 `GET /workspace/agent` 仍可用，并指向同一套页面；`/workspace/agent`
+默认打开人工工作台。它们不包含 production 登录能力。页面行为、error case 和 Mock 边界见
+[五屏原型前端](ui.md)。
 
 ## 品牌洞察
 

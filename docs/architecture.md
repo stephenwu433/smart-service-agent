@@ -61,6 +61,10 @@ MongoDB 使用 `conversations`、`audit_events`、`service_events`、`feedback` 
 `conversation_id + idempotency_key` 使用 unique compound index，防止同一会话重复建单。连接具有
 明确 timeout，URI 中的 credential 不写入代码或日志。
 
+报名验证版 Demo 前端是 FastAPI 提供的静态五屏页面（`GET /ui`），静态文件位于
+`src/smart_service_agent/web/`。浏览器只提交用户原话、观察和客服动作；状态机仍由
+`ConversationOrchestrator` 决定，不引入独立 frontend 服务。
+
 生产 deployment 仍需配置认证、TLS、备份和最小权限账号，并在 API 前增加身份认证、角色授权、
 rate limit 和正式审计主体。当前审计主体标记为 `unauthenticated_agent_api`，用于明确暴露鉴权尚未
 接入，而不是伪装成真实客服身份；配置化响应时间也不得作为未经运营确认的真实客服承诺。

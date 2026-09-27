@@ -3,7 +3,7 @@ from __future__ import annotations
 from typing import Literal, Optional, Union
 
 from fastapi import FastAPI, HTTPException, Query, Request, status
-from fastapi.responses import HTMLResponse, JSONResponse
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
 from pymongo.errors import PyMongoError
 
 from smart_service_agent import __version__
@@ -32,6 +32,7 @@ from smart_service_agent.models import (
 )
 from smart_service_agent.orchestration import ConversationOrchestrator
 from smart_service_agent.repository import MongoRepository, StorageRepository
+from smart_service_agent.ui_assets import ui_file
 
 
 def create_app(
@@ -281,13 +282,22 @@ def create_app(
             raise HTTPException(status_code=404, detail="ticket not found")
         return ticket
 
+    @application.get("/ui", include_in_schema=False)
+    @application.get("/ui/", include_in_schema=False)
+    def ui_home() -> FileResponse:
+        return ui_file("index.html")
+
+    @application.get("/ui/{asset_name}", include_in_schema=False)
+    def ui_asset(asset_name: str) -> FileResponse:
+        return ui_file(asset_name)
+
     @application.get("/workspace/consumer", response_class=HTMLResponse, tags=["workspace"])
-    def consumer_workspace() -> str:
-        return _consumer_workspace_html()
+    def consumer_workspace() -> FileResponse:
+        return ui_file("index.html")
 
     @application.get("/workspace/agent", response_class=HTMLResponse, tags=["workspace"])
-    def agent_workspace() -> str:
-        return _agent_workspace_html()
+    def agent_workspace() -> FileResponse:
+        return ui_file("index.html")
 
     @application.get("/v1/insights/overview", response_model=InsightsResponse, tags=["brand"])
     def get_insights(
@@ -337,34 +347,3 @@ def create_app(
 
 
 app = create_app()
-
-
-def _consumer_workspace_html() -> str:
-    return """<!doctype html><html lang="zh-CN"><meta charset="utf-8">
-<meta name="viewport" content="width=device-width,initial-scale=1">
-<title>消费者服务工作区</title><style>
-body{font:16px system-ui;max-width:760px;margin:3rem auto;padding:0 1rem}
-textarea,input,button{font:inherit;padding:.7rem;margin:.35rem 0;width:100%}
-button{width:auto}.result{white-space:pre-wrap;background:#f5f5f5;padding:1rem}</style>
-<h1>安克智能服务助手（比赛演示）</h1><p>面向充电器、移动电源等设备，每次只补充一个必要信息，并只调整一个条件。你也可以随时转人工。</p>
-<input id="product" placeholder="产品名称（可选）">
-<textarea id="message" rows="5" placeholder="描述问题和已经尝试的方法"></textarea>
-<button onclick="send()">开始排查</button><div id="result" class="result" aria-live="polite"></div>
-<script>async function send(){
-const payload={message:message.value,product:product.value||null};
-const r=await fetch('/v1/conversations',{method:'POST',
-headers:{'content-type':'application/json'},body:JSON.stringify(payload)});
-const b=await r.json();result.textContent=b.message||b.detail;}</script></html>"""
-
-
-def _agent_workspace_html() -> str:
-    return """<!doctype html><html lang="zh-CN"><meta charset="utf-8">
-<meta name="viewport" content="width=device-width,initial-scale=1"><title>人工客服工作台</title>
-<style>body{font:16px system-ui;max-width:900px;margin:3rem auto;padding:0 1rem}
-li{padding:.6rem;border-bottom:1px solid #ddd}</style>
-<h1>人工客服工作台</h1><p>队列按风险优先级和等待时间排列。回复、动作完成与用户确认解决分别记录。</p>
-<button onclick="load()">刷新队列</button><ol id="events" aria-live="polite"></ol>
-<script>async function load(){const r=await fetch('/v1/agent/events');
-const b=await r.json();events.innerHTML=b.map(x=>
-`<li><b>${x.status}</b> ${x.reason} <small>${x.event_id}</small></li>`
-).join('')}</script></html>"""

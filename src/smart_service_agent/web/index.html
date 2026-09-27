@@ -1,0 +1,180 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <title>安克智能服务助手（比赛演示）</title>
+    <link rel="stylesheet" href="/ui/styles.css" />
+  </head>
+  <body>
+    <div class="mock-banner" role="status">
+      模拟工单 / 演示环境，尚未连接安克官方客服系统
+    </div>
+    <header class="top">
+      <div>
+        <p class="eyebrow">Anker 737 · A1289 · 报名验证版</p>
+        <h1>安克智能服务助手（比赛演示）</h1>
+        <p class="lede">
+          只处理 A1289 给充电宝自身充电时充不进去。页面按原型五屏组织，路径由后端决定。
+        </p>
+      </div>
+      <nav class="panel-nav" aria-label="五屏原型">
+        <button data-panel="start" class="active">1 开始咨询</button>
+        <button data-panel="ask">2 追问确认</button>
+        <button data-panel="guide">3 当前一步</button>
+        <button data-panel="risk">4 风险转人工</button>
+        <button data-panel="agent">5 人工工作台</button>
+      </nav>
+    </header>
+
+    <section class="stories" aria-label="三条固定演示故事">
+      <p>快速填入验收故事（仍由后端决定路径）：</p>
+      <button type="button" data-seed="A1289 接 C1 充不进去，屏幕一直 0W。">故事1 接口更正</button>
+      <button
+        type="button"
+        data-seed="A1289 接 C1，插座正常，我有备用充电器和 USB-C to USB-C 线。"
+      >
+        故事2 配件交叉
+      </button>
+      <button type="button" data-seed="A1289 充不进去，现在看起来有点鼓包。">故事3 途中风险</button>
+    </section>
+    <p class="error" id="error-banner" hidden></p>
+
+    <main>
+      <article id="panel-start" class="panel phone active">
+        <header>
+          <span>Panel 1</span>
+          <h2>开始咨询</h2>
+        </header>
+        <p class="hint">描述 A1289 自身充电问题。不要在这里办理退款或给手机充电。</p>
+        <label for="start-message">用户原话</label>
+        <textarea
+          id="start-message"
+          rows="5"
+          placeholder="例如：A1289 接 C1 充不进去，屏幕 0W"
+        ></textarea>
+        <button class="primary" id="start-send">开始排查</button>
+        <p class="meta" id="session-meta">尚未创建会话</p>
+      </article>
+
+      <article id="panel-ask" class="panel phone">
+        <header>
+          <span>Panel 2</span>
+          <h2>追问与待确认</h2>
+        </header>
+        <div class="card">
+          <h3>处理进度</h3>
+          <p id="ask-state">等待开始</p>
+        </div>
+        <div class="card">
+          <h3>待确认项</h3>
+          <ul id="missing-list"></ul>
+        </div>
+        <div class="card">
+          <h3>已确认事实</h3>
+          <ul id="fact-list"></ul>
+        </div>
+        <label for="ask-message">补充或更正</label>
+        <textarea
+          id="ask-message"
+          rows="3"
+          placeholder="一次只补充一项；不确定就写不确定"
+        ></textarea>
+        <div class="row wrap">
+          <button class="primary" id="ask-send">发送</button>
+          <button id="ask-unknown">记为不确定</button>
+          <button id="ask-safe">没有风险迹象</button>
+        </div>
+      </article>
+
+      <article id="panel-guide" class="panel phone">
+        <header>
+          <span>Panel 3</span>
+          <h2>当前一步</h2>
+        </header>
+        <div class="card accent" id="current-step">
+          <h3>当前一步</h3>
+          <p>进入 GUIDE 后才会出现有依据的单步建议。</p>
+        </div>
+        <div class="card" id="evidence-card">
+          <h3>知识依据</h3>
+          <ul id="evidence-list"></ul>
+        </div>
+        <label for="observe-message">执行反馈 / 观察结果</label>
+        <textarea
+          id="observe-message"
+          rows="3"
+          placeholder="例如：改接 C1 后有输入了 / 换插座后仍是 0W"
+        ></textarea>
+        <div class="row wrap">
+          <button class="primary" data-outcome="executed">已执行并观察</button>
+          <button data-outcome="improved">已恢复</button>
+          <button data-outcome="skipped">跳过此步</button>
+          <button data-outcome="skipped_unavailable">没有配件</button>
+        </div>
+        <div class="row wrap confirm-actions" id="resolve-actions">
+          <button class="primary" id="confirm-stable">持续有输入，没有中断</button>
+          <button id="confirm-unstable">又变成 0W 或中断了</button>
+        </div>
+        <div class="card">
+          <h3>历史尝试</h3>
+          <ol id="attempt-list"></ol>
+        </div>
+      </article>
+
+      <article id="panel-risk" class="panel phone">
+        <header>
+          <span>Panel 4</span>
+          <h2>风险停止与模拟转人工</h2>
+        </header>
+        <div class="card danger" id="risk-copy">
+          <h3>停止条件</h3>
+          <p>鼓包、冒烟、异味、进液、异常发热时停止普通排障，不能因用户想继续而恢复测试。</p>
+        </div>
+        <div class="transcript" id="risk-message"></div>
+        <div class="row wrap">
+          <button class="primary" id="handoff-yes">同意模拟转人工</button>
+          <button id="handoff-no">暂不转人工</button>
+        </div>
+        <p class="hint">转人工后生成模拟事件，不会创建真实安克工单。</p>
+      </article>
+
+      <article id="panel-agent" class="panel desk">
+        <header>
+          <span>Panel 5</span>
+          <h2>人工客服工作台</h2>
+        </header>
+        <div class="split">
+          <div>
+            <div class="row">
+              <button class="primary" id="refresh-queue">刷新队列</button>
+            </div>
+            <ol id="event-queue"></ol>
+          </div>
+          <div id="agent-detail">
+            <p>从队列选择一个模拟事件，查看原话、事实与更正、尝试及结果、知识依据和升级原因。</p>
+          </div>
+        </div>
+        <form id="agent-action" class="card">
+          <h3>人工回复与处理动作</h3>
+          <select id="agent-action-type">
+            <option value="reply">回复</option>
+            <option value="request_material">索要材料</option>
+            <option value="create_after_sales">建立售后记录</option>
+            <option value="escalate_expert">升级专家</option>
+            <option value="close">关闭事件</option>
+          </select>
+          <textarea id="agent-note" rows="2" placeholder="处理说明"></textarea>
+          <button class="primary" type="submit">记录动作</button>
+        </form>
+      </article>
+    </main>
+
+    <aside class="live" aria-live="polite">
+      <h2>对话与进度</h2>
+      <p id="live-state">状态：未开始</p>
+      <ol id="transcript"></ol>
+    </aside>
+    <script src="/ui/app.js"></script>
+  </body>
+</html>
