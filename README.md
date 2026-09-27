@@ -43,6 +43,23 @@ bash scripts/dev.sh         # 默认加载 config/development.env
 
 完整操作说明见 [五屏原型前端](docs/ui.md)。
 
+## 给别人看的 Streamlit Demo
+
+`http://127.0.0.1:8000/ui` 只在你自己的电脑上有效，别人打不开。公开演示用 Streamlit：
+
+```bash
+bash scripts/streamlit-demo.sh
+```
+
+本机预览 <http://127.0.0.1:8501>。要发给别人，在
+[Streamlit Community Cloud](https://share.streamlit.io/) 用 GitHub 登录，选择本仓库、
+`streamlit_app.py` 后 Deploy，得到 `https://<app-name>.streamlit.app`。
+
+Streamlit 入口是仓库根目录 [`streamlit_app.py`](streamlit_app.py)，后端是
+[`src/smart_service_agent/demo_backend.py`](src/smart_service_agent/demo_backend.py)
+（同一套 A1289 编排器 + 内存仓储，不需要 MongoDB）。步骤见
+[Streamlit 公开 Demo](docs/streamlit-demo.md)。
+
 ## 已实现能力
 
 - 消费者多轮咨询及 `GUIDE`、`RESOLVE`、`ASK`、`HANDOFF`、`BLOCK` 状态编排；

@@ -8,6 +8,8 @@
   Mock 标识；`/workspace/consumer` 与 `/workspace/agent` 指向同一套页面。
 - README 补充 Demo 启动步骤（默认 `config/development.env`）、前端源码路径
   `src/smart_service_agent/web/` 和五屏截图。
+- Streamlit 五屏 Demo（`streamlit_app.py`），用同一套 A1289 编排器和内存仓储，便于部署到
+  Streamlit Community Cloud；`127.0.0.1:8000/ui` 仍只用于本机。
 - Cross-turn risk lock on `StoredConversation` (`risk_lock`,
   `risk_lock_reason`, `risk_lock_source`). Once a safety risk is detected,
   subsequent turns stay in `BLOCK` until an unrelated after-sales topic

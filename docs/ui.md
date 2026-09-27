@@ -89,3 +89,5 @@ bash scripts/dev.sh         # 不传参数即加载 config/development.env
 - 转人工只创建模拟事件，不得显示为真实安克工单。
 
 原型图 ZIP 未进入本仓库；页面结构按冻结表五屏与消费者/人工端统一用语实现，而不是像素级还原。
+
+要发给别人打开时，不要用 `127.0.0.1:8000/ui`。改用 [Streamlit 公开 Demo](streamlit-demo.md)。
