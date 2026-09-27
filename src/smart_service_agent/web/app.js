@@ -195,7 +195,22 @@ function applyResponse(body, userText) {
   }
 }
 
-async function sendMessage(text, { switchTo } = {}) {
+function resetSession() {
+  state.conversationId = null;
+  state.last = null;
+  state.caseData = null;
+  state.attempts = [];
+  state.selectedEvent = null;
+  state.selectedConversationId = null;
+  state.agentView = null;
+  state.transcript = [];
+  showError("");
+  $("start-message").value = "";
+  $("ask-message").value = "";
+  $("observe-message").value = "";
+  renderSession();
+  showPanel("start");
+}
   const message = text.trim();
   if (!message) return;
   showError("");
@@ -353,9 +368,10 @@ function bind() {
     });
   });
   $("start-send").addEventListener("click", () => sendMessage($("start-message").value));
+  $("new-session").addEventListener("click", () => resetSession());
   $("ask-send").addEventListener("click", () => sendMessage($("ask-message").value));
   $("ask-unknown").addEventListener("click", () => sendMessage("不确定"));
-  $("ask-safe").addEventListener("click", () => sendMessage("没有鼓包、冒烟、异味、进液或异常发热"));
+  $("ask-safe").addEventListener("click", () => sendMessage("没有"));
   document.querySelectorAll("[data-outcome]").forEach((button) => {
     button.addEventListener("click", () => reportAttempt(button.dataset.outcome));
   });

@@ -20,6 +20,7 @@ def test_ui_five_panels_are_served() -> None:
     assert "Panel 1" in page.text
     assert "Panel 5" in page.text
     assert "开始咨询" in page.text
+    assert "新会话" in page.text
     assert "追问与待确认" in page.text
     assert "当前一步" in page.text
     assert "风险停止与模拟转人工" in page.text
@@ -41,6 +42,8 @@ def test_ui_javascript_calls_existing_api() -> None:
     assert "/v1/conversations/${state.conversationId}/handoff" in script
     assert "/v1/agent/events" in script
     assert "Anker 737 Power Bank A1289" in script
+    assert 'sendMessage("没有")' in script
+    assert "没有鼓包、冒烟、异味、进液或异常发热" not in script
 
 
 def test_legacy_workspaces_serve_the_same_prototype() -> None:
