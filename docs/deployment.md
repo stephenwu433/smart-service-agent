@@ -9,7 +9,7 @@
 2. 在 `.env` 或 runtime environment 注入 `MONGODB_URI`；不得把 credential 写入 repository。
 3. 运行 `scripts/check.sh`，确认 lint、format 和全部 test 通过。
 4. 启动 MongoDB，然后运行 `scripts/dev.sh config/production.env`。
-5. 检查 `/health`、`/workspace/consumer`，再走通创建会话、Case、Attempt、转人工和 Ticket 结果链路。
+5. 检查 `/health`、`/ui`，再走通创建会话、Case、Attempt、转人工和 Ticket 结果链路。
 
 也可以构建不包含 `.env` 和本地数据的 image：
 
@@ -36,4 +36,4 @@ production 中应通过 secret manager 注入 `MONGODB_URI`，并将 image 固�
 ## 发布阻断项
 
 鉴权、RBAC、TLS、正式客服身份、备份、并发认领和 external integration 在 production 开放前仍是
-阻断项。最小 workspace 只用于内部联调和 Demo，不能直接暴露到公网。
+阻断项。五屏前端和兼容 workspace 只用于内部联调和 Demo，不能直接暴露到公网。

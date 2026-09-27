@@ -7,6 +7,8 @@
 - [开发环境](development.md)：config、data、sandbox 和 scripts 的使用方式。
 - [Configuration](configuration.md)：environment variable、加载顺序与安全边界。
 - [比赛 MVP API](api.md)：消费者、人工客服与品牌洞察 endpoint、状态语义和 error behavior。
+- [五屏原型前端](ui.md)：`GET /ui` 的五屏 Demo、调用的 API、error case 与 Mock 边界。
+- [Streamlit 公开 Demo](streamlit-demo.md)：把同一套 A1289 流程部署到 Streamlit Cloud，供别人打开。
 - [比赛 MVP Backend Architecture](architecture.md)：请求链路、状态机、持久化、provider 边界和
   production 接入路线。
 - [MongoDB](mongodb.md)：本地启动、collection、index 与 production 安全要求。

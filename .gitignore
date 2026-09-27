@@ -9,6 +9,10 @@
 !/Dockerfile
 !/README.md
 !/pyproject.toml
+!/requirements.txt
+!/streamlit_app.py
+!/.streamlit/
+!/.streamlit/**
 !/config/
 !/config/**
 !/data/
